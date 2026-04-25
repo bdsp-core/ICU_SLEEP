@@ -1,0 +1,96 @@
+cff-version: 1.2.0
+title: "ICU-SLEEP — Investigation of Sleep in the Intensive Care Unit (analysis code)"
+message: "If you use this code, please cite both the manuscript and the bdsp.io data publication."
+type: software
+authors:
+  - family-names: Tesh
+    given-names: Ryan A.
+  - family-names: Deng
+    given-names: Hao
+  - family-names: Quadri
+    given-names: Syed A.
+  - family-names: Adra
+    given-names: Noor
+  - family-names: Bucklin
+    given-names: Abigail A.
+  - family-names: Leone
+    given-names: Michael J.
+  - family-names: Hemmige
+    given-names: Aashritha
+  - family-names: Rajan
+    given-names: Subapriya
+  - family-names: Krishnamurthy
+    given-names: Parimala V.
+  - family-names: Gallagher
+    given-names: Kaileigh
+  - family-names: Panneerselvam
+    given-names: Ezhil
+  - family-names: Firme
+    given-names: Marcos S.
+  - family-names: Ali
+    given-names: Syed Musadiq
+  - family-names: Ali
+    given-names: Syed Zahid
+  - family-names: Ayub
+    given-names: Muhammad Abubakar
+  - family-names: Paixao
+    given-names: Luis
+  - family-names: Higgins
+    given-names: Jasmine M.
+  - family-names: Ganglberger
+    given-names: Wolfgang
+  - family-names: Ju
+    given-names: Yawen
+  - family-names: Banks
+    given-names: Jayme
+  - family-names: Coughlin
+    given-names: Brian
+  - family-names: Houle
+    given-names: Timothy T.
+  - family-names: Leveroni
+    given-names: Catherine L.
+  - family-names: DiBiasio
+    given-names: Alan J.
+  - family-names: Kuller
+    given-names: David
+  - family-names: Rosand
+    given-names: Jonathan
+  - family-names: Thompson
+    given-names: B. Taylor
+  - family-names: Thomas
+    given-names: Robert J.
+  - family-names: Akeju
+    given-names: Oluwaseun
+  - family-names: Westover
+    given-names: M. Brandon
+    email: mb.westover@gmail.com
+    affiliation: Beth Israel Deaconess Medical Center
+repository-code: "https://github.com/bdsp-core/ICU_SLEEP"
+url: "https://bdsp.io/projects/phgb6nut6vxcqew5tiek/overview/"
+abstract: >
+  Analysis pipeline for the ICU-SLEEP randomized controlled trial of nocturnal
+  dexmedetomidine in non-ventilated medical/surgical ICU patients aged 50+.
+  Reproduces baseline characteristic tables, primary and secondary outcomes
+  (delirium-free days), 3-arm sensitivity analyses, survival/mortality, and
+  forest plots presented in the manuscript and supplementary materials.
+keywords:
+  - ICU
+  - delirium
+  - dexmedetomidine
+  - sleep
+  - randomized controlled trial
+  - clinical trial
+  - HIPAA Safe Harbor
+license: MIT
+identifiers:
+  - description: "ClinicalTrials.gov registration"
+    type: other
+    value: "NCT03355053"
+  - description: "IRB"
+    type: other
+    value: "MGB IRB #2017P000090"
+  - description: "Funding"
+    type: other
+    value: "NIH NINDS R01NS102190"
+  # TODO once accepted: add the manuscript DOI and the bdsp.io data DOI
+  # TODO add ORCIDs for each author (currently omitted; can be added incrementally)

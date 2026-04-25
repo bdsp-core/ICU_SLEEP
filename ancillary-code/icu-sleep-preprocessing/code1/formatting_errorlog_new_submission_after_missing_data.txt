@@ -1,0 +1,6 @@
+
+ LUN07_764-1559683996_1_v4.matno VS or WV data in bundle. ignored for now.
+ BIG13_1326-1558386657_33_v4.mat"Unable to open object (file read failed: time = Tue Jan 28 03:08:38 2020\n, filename = '//eris1fs2/CDAC/bedmaster_data/batching/wg984_20200126_170310/BIG13_1326-1558386657_33_v4.mat', file descriptor = 5, errno = 22, error message = 'Invalid argument', buf = 0000017E984F2BA0, total read size = 232, bytes this sub-read = 232, bytes actually read = 18446744073709551615, offset = 82979580)"
+ BLK07_766-1573334582_3_v4.matno VS or WV data in bundle. ignored for now.
+ LUN10_1012-1573508378_8_v4.matno VS or WV data in bundle. ignored for now.
+ LUN10_1012-1573508378_9_v4.matno VS or WV data in bundle. ignored for now.

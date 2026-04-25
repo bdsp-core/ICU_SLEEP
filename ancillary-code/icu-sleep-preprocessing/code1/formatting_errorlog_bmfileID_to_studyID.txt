@@ -1,0 +1,56 @@
+
+ 66.0
+ ELL04_406-1554232479Unable to open file (unable to open file: name = '/media/mad3/Projects/ICU_SLEEP_STUDY/data/data_analysis/BMR_fileID/ELL04_406-1554232479.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 43.0
+ ELL04_402-1549599295Can't broadcast (0,) -> (1858,)
+ 139.0
+ BLK12_1254-1565826778Unable to open file (unable to open file: name = '/media/mad3/Projects/ICU_SLEEP_STUDY/data/data_analysis/BMR_fileID/BLK12_1254-1565826778.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 93.0
+ ELL14_1414-1560211208Can't broadcast (0,) -> (54774,)
+<<<<<<< HEAD
+run code with bugfix and for smaller sample size.
+
+ 44
+ BLK12_1268-1550616601Unable to open file (unable to open file: name = '/media/mad3/Projects/ICU_SLEEP_STUDY/data/data_analysis/BMR_fileID/BLK12_1268-1550616601.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+file cannot be found. ok.
+
+
+ 113
+ BIG13_1326-1558386657Unable to open file (unable to open file: name = '/media/mad3/Projects/ICU_SLEEP_STUDY/data/data_analysis/BMR_fileID/BIG13_1326-1558386657.h5', errno = 11, error message = 'Resource temporarily unavailable', flags = 0, o_flags = 0)
+=======
+ 146
+ BLK12_1272-1566601625Can't broadcast (0,) -> (106358,)
+ 147
+ BLK12_1256-1566687902Can't broadcast (0,) -> (16157606,)
+ 8
+ BLK07_788-1531346646,BLK07_788-1531408226Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/BLK07_788-1531346646,BLK07_788-1531408226.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 27
+ BLK07_768-1547323995,BLK07_768-1547647085Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/BLK07_768-1547323995,BLK07_768-1547647085.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 36
+ BLK07_766-1548719417,BLK07_766-1549067030,BLK07_778-1549418939,BLK07_786-1549816181,BLK07_778-1549981372,BLK07_786-1550078285Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/BLK07_766-1548719417,BLK07_766-1549067030,BLK07_778-1549418939,BLK07_786-1549816181,BLK07_778-1549981372,BLK07_786-1550078285.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 43
+ ELL04_402-1549599295,ELL04_414-1549673602,ELL04_414-1549844349Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/ELL04_402-1549599295,ELL04_414-1549673602,ELL04_414-1549844349.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 44
+ BLK12_1258-1546474180,BLK12_1268-1550616601,BLK12_1268-1550623121,BLK12_1258-1550691336Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/BLK12_1258-1546474180,BLK12_1268-1550616601,BLK12_1268-1550623121,BLK12_1258-1550691336.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 185
+ LUN10_1072-1572446220,BLK07_770-1572939539,BLK07_770-1573615241,LUN10_1072-1573754384Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/LUN10_1072-1572446220,BLK07_770-1572939539,BLK07_770-1573615241,LUN10_1072-1573754384.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 8
+ 8
+ 36
+ BLK07_778-1549418939Can't broadcast (0,) -> (442,)
+ 43
+ ELL04_414-1549673602Can't broadcast (0,) -> (134,)
+ 44
+ BLK12_1268-1550616601Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/BLK12_1268-1550616601.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 185
+ BLK07_770-1572939539Can't broadcast (0,) -> (56,)
+ 12
+ BLK07_788-1540401161Can't broadcast (0,) -> (103606,)
+ 28
+ BLK12_1252-1547942773"Unable to open object (file read failed: time = Thu Jan 30 07:31:21 2020\n, filename = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\\BMR_fileID/BLK12_1252-1547942773.h5', file descriptor = 4, errno = 22, error message = 'Invalid argument', buf = 000002AD15BA3FD0, total read size = 512, bytes this sub-read = 512, bytes actually read = 18446744073709551615, offset = 96)"
+ 76
+ 76
+ BLK12_1282-1556320216Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/BLK12_1282-1556320216.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+ 158
+ ELL09_916-1569287282Unable to open file (unable to open file: name = 'M:Projects/ICU_SLEEP_STUDY/data/data_analysis\BMR_fileID/ELL09_916-1569287282.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+>>>>>>> 7df50e71c4295b81010916d223060dd5ec58bf82

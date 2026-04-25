@@ -1,0 +1,733 @@
+---
+title: "Primary Analysis"
+output: 
+  html_notebook: 
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    theme: simplex
+    number_sections: true
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+---
+
+```{r warning=FALSE , message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(knitr)
+library(magrittr)
+library(janitor)
+library(readxl)
+options(scipen=999)
+library(readr)
+library(gofcat)
+
+# set width of the output
+options(width = 120)
+```
+
+# Load data
+```{r}
+outcome1 = readRDS("data/rds/outcome1.rds")
+group = readRDS("data/rds/group.rds")
+demo = readRDS("data/rds/demo.rds")
+itt = readRDS("data/rds/itt.rds")
+# sanity check: itt group does not contain keyword bolus
+# itt = itt %>% filter(randomization_allocation_assignment_list %in% c("Dex 0.1 mcg/kg/h", "Dex 0.3 mcg/kg/h", "Placebo"))
+# pp = readRDS("data/rds/pp.rds")
+mitt = readRDS("data/rds/mitt.rds")
+adj = demo %>% select(sid, age, sex, race, ethnicity)
+```
+
+# Apply analytical samples
+```{r}
+# use mitt
+outcome1 = outcome1 %>% filter(sid %in% mitt$sid)
+group = group %>% filter(sid %in% mitt$sid)
+
+# group2g to combine two Dex groups
+group$group2g = group$group %>% as.character()
+group$group2g[group$group2g == "Dex 0.1 mcg/kg/h"] = "Dex"
+group$group2g[group$group2g == "Dex 0.3 mcg/kg/h"] = "Dex"
+group$group2g = as.character(group$group2g)
+group$group2g = as.factor(group$group2g)
+group$group2g = relevel(group$group2g, ref = "Placebo")
+
+# set Placebo as the group reference
+group$group3g = group$group %>% as.character()
+group$group3g = as.factor(group$group3g)
+group$group3g = relevel(group$group3g, ref = "Placebo")
+
+# remove group
+group = group %>% select(-group)
+
+# left join
+data1 = left_join(outcome1, group, by = "sid")
+data1 = left_join(data1, adj, by = "sid")
+data1 = data1 %>% filter(sid %in% mitt$sid)
+```
+
+```{r}
+# adj_14day_DFD is the imputed DFD for in-hospital DFDs -> up to 14 days.
+
+# make adj_14day_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$adj_DFDs) %>% sort()
+data1$adj_DFDs = factor(data1$adj_DFDs, levels = levels, ordered = T)
+
+# make unadj_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$unadj_DFDs) %>% sort()
+data1$unadj_DFDs = factor(data1$unadj_DFDs, levels = levels, ordered = T)
+
+# make adj_ICU_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$adj_ICU_DFDs) %>% sort()
+data1$adj_ICU_DFDs = factor(data1$adj_ICU_DFDs, levels = levels, ordered = T)
+
+# make unadj_ICU_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$unadj_ICU_DFDs) %>% sort()
+data1$unadj_ICU_DFDs = factor(data1$unadj_ICU_DFDs, levels = levels, ordered = T)
+
+#janitor::tabyl(outcome1$adj_DFDs)
+#janitor::tabyl(outcome1$unadj_DFDs)
+
+covariate = demo %>% 
+  select(sid, day_1_sofa_score, mean_iqcode_score, delirium_status,days_in_icu_pre_enrollment, days_in_hosp_pre_enrollment,obstructive_sleep_apnea_y_n,
+         med_prestudy_benzos_yn,med_prestudy_phenobarbital_yn)
+  
+data1 = left_join(data1, covariate, by = "sid")
+```
+
+```{r}
+# data1$delirium_status as 0/1
+data1$delirium_status = case_when(
+  data1$delirium_status == "N" ~ 0,
+  data1$delirium_status == "Y" ~ 1
+)
+
+data1 = data1 %>% mutate(t_icu = days_in_icu_pre_enrollment) # t_icu --> days in ICU pre-enrollment
+data1 = data1 %>% mutate(t_hosp = days_in_hosp_pre_enrollment) # t_hosp --> days in hospital pre-enrollment
+```
+
+# choose 2 groups or 3 groups
+
+Now we start analysis - distributions already checked up
+- primary analysis start here
+- groupx is group2g or group3g depending on the selection
+
+```{r}
+# now new group2 = 2g or 3g
+# data1 = data1 %>% mutate(groupx = group2g)
+data1 = data1 %>% mutate(groupx = group3g)
+```
+
+```{r}
+library(clipr)
+# check distribution of DFDs
+dist_plot_data = data1 %>% select(sid, group2g, group3g, adj_DFDs, unadj_DFDs, adj_ICU_DFDs, unadj_ICU_DFDs)
+write_clip(dist_plot_data)
+```
+
+```{r}
+data1$adj_DFDs <- ordered(data1$adj_DFDs)
+data1$unadj_DFDs <- ordered(data1$unadj_DFDs)
+data1$adj_ICU_DFDs <- ordered(data1$adj_ICU_DFDs)
+data1$unadj_ICU_DFDs <- ordered(data1$unadj_ICU_DFDs)
+```
+
+
+
+# Imputed in-hosp DFDs
+Note: adj in-hosp DFDs are calculated as imputed upto 14-day DFD.
+
+## crude/univariate
+```{r}
+library(ordinal)
+library(gtsummary)                                                
+# load each session
+
+# crude model
+mod1 = clm(adj_DFDs ~ groupx, data = data1, link = "logit")
+summary(mod1)
+# tests
+# brant.test(mod1)
+# scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+
+## multivariable model
+```{r fig.height=6, fig.width=12}
+library(performance)
+
+# adjusted model
+adjust = " + age + day_1_sofa_score + mean_iqcode_score + delirium_status + t_hosp + t_icu"
+fit1 = paste0("adj_DFDs", " ~ groupx", adjust)
+fit1
+mod1 = clm(fit1, data = data1, link = "logit")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+
+```
+## interaction analysis for mv model
+- groupx*delirium_status interaction
+```{r}
+# interaction analysis
+# adjusted model
+fit1 = "adj_DFDs ~ groupx*delirium_status + age + day_1_sofa_score + mean_iqcode_score + t_icu + t_hosp"
+mod1 = clm(fit1, data = data1, link = "logit")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+
+## compare models
+conclusion: the interaction model did not significantly improve model fit -> go with mv model without interaction term.
+```{r}
+# compare models: uni vs mv vs interaction -> LR test
+uni = clm(adj_DFDs ~ groupx, data = data1, link = "logit")
+mv = clm(adj_DFDs ~ groupx + age + mean_iqcode_score + delirium_status + t_icu + t_hosp, data = data1, link = "logit")
+interaction = clm(adj_DFDs ~ groupx*delirium_status + age + mean_iqcode_score + t_icu + t_hosp, data = data1, link = "logit")
+anova(uni, mv)
+anova(mv, interaction)
+```
+
+# Unimputed in-hosp DFDs
+## crude model
+```{r}
+# crude model
+fit1 = paste0("unadj_DFDs", " ~ groupx")
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+
+
+```
+## multivariable model
+```{r fig.height=6, fig.width=12}
+library(performance)
+# adjusted model
+adjust = " + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp"
+fit1 = paste0("unadj_DFDs", " ~ groupx", adjust)
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+
+# Imputed in-ICU DFDs
+## crude
+```{r}
+# crude model
+fit1 = paste0("adj_ICU_DFDs", " ~ groupx") # imputed ICU DFDs
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+## multivariate model
+```{r fig.height=6, fig.width=12}
+library(performance)
+
+# adjusted model
+adjust = " + age + day_1_sofa_score + mean_iqcode_score + delirium_status + t_hosp + t_icu"
+
+fit1 = paste0("adj_ICU_DFDs", " ~ groupx", adjust)
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+
+```
+## interaction analysis for MV model
+```{r}
+# interaction analysis
+# adjusted model
+fit1 = "adj_ICU_DFDs ~ groupx*delirium_status + age + day_1_sofa_score + mean_iqcode_score + t_icu + t_hosp"
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+library(emmeans)
+emm1 = emmeans(mod1, list(pairwise ~ groupx|delirium_status))
+summary(emm1, infer = T, adjust = "none")
+```
+
+## compare models
+conclusion: same as in-hosp DFDs, the interaction model did not significantly improve model fit -> go with mv model without interaction
+```{r}
+# compare models: uni vs mv vs interaction -> LR test
+uni = clm(adj_ICU_DFDs ~ groupx, data = data1, link = "logit", method = "nlminb")
+mv = clm(adj_ICU_DFDs ~ groupx + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, data = data1, link = "logit", method = "nlminb")
+interaction = clm(adj_ICU_DFDs ~ groupx*delirium_status + age + day_1_sofa_score + mean_iqcode_score + t_icu + t_hosp, data = data1, link = "logit", method = "nlminb")
+anova(uni, mv)
+anova(mv, interaction)
+```
+# Unimputed in-ICU DFDs
+## crude
+```{r}
+# crude model
+fit1 =  NULL 
+fit1 = paste0("unadj_ICU_DFDs", " ~ groupx") # unimputed ICU DFDs
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+## mv model
+```{r fig.height=6, fig.width=12}
+library(performance)
+# adjusted model
+adjust = " + age + day_1_sofa_score + mean_iqcode_score + delirium_status + t_icu + t_hosp"
+fit1 = paste0("unadj_ICU_DFDs", " ~ groupx", adjust)
+mod1 = clm(fit1, data = data1, link = "logit", method = "nlminb")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+
+# HTE analysis
+## Imputed in-hosp DFDs
+```{r}
+# HTE analysis for in-hosp DFDs
+# make adj_DFDs a binary variable: 0 if DFDs >7, 1 if DFDs <= 7
+data1$adj_DFDs2 = as.numeric(as.character(data1$adj_DFDs))
+data1$adj_DFDs2 = case_when(
+  data1$adj_DFDs2 > 7 ~ 0,
+  data1$adj_DFDs2 <= 7 ~ 1
+)
+
+# table(data1$adj_DFDs2)
+
+risk_fit <- glm(
+  adj_DFDs2 ~ age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,
+  family = binomial(),
+  data = data1
+)
+
+# risk_fit <- glm(
+#   adj_DFDs2 ~ age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,
+#   family = binomial(),
+#   data = subset(data1, groupx == "Placebo")
+# )
+# summary(risk_fit)
+
+data1$risk0 <- predict(risk_fit, newdata = data1, type = "response")
+summary(data1$risk0)
+```
+
+```{r}
+hte_fit <- glm(
+  adj_DFDs2 ~ groupx * risk0,
+  family = binomial(),
+  data = data1
+)
+```
+
+```{r}
+# Install if needed:
+# install.packages(c("fastshap", "ggplot2", "dplyr", "tidyr"))
+
+library(fastshap)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# --------------------------------------------------
+#   Predictor matrix for SHAP
+# --------------------------------------------------
+X <- data1 %>%
+  select(
+    age,
+    mean_iqcode_score,
+    day_1_sofa_score,
+    delirium_status,
+    t_icu,
+    t_hosp
+  )
+
+# --------------------------------------------------
+#    Prediction wrapper
+#    Explain the model on the log-odds scale
+# --------------------------------------------------
+pred_wrapper_link <- function(object, newdata) {
+  out <- predict(object, newdata = newdata, type = "link")
+  unname(as.numeric(out))
+}
+
+# Sanity check
+tmp <- pred_wrapper_link(risk_fit, X)
+stopifnot(is.numeric(tmp), length(tmp) == nrow(X))
+
+# --------------------------------------------------
+# Compute SHAP values
+# --------------------------------------------------
+set.seed(123)
+
+shap_values <- fastshap::explain(
+  object = risk_fit,
+  X = X,
+  pred_wrapper = pred_wrapper_link,
+  nsim = 200,
+  adjust = TRUE
+)
+
+# --------------------------------------------------
+# Global SHAP importance
+# --------------------------------------------------
+global_shap <- data.frame(
+  feature = colnames(shap_values),
+  mean_abs_shap = apply(abs(as.matrix(shap_values)), 2, mean)
+) %>%
+  arrange(desc(mean_abs_shap))
+
+# relabel features
+global_shap$feature <- recode(global_shap$feature,
+  age = "Age",
+  mean_iqcode_score = "Mean IQCODE Score",
+  day_1_sofa_score = "Day 1 SOFA Score",
+  delirium_status = "Delirium Status",
+  t_icu = "Days in ICU Pre-enrollment",
+  t_hosp = "Days in Hospital Pre-enrollment"
+)
+
+# remove rownames
+rownames(global_shap) <- NULL
+
+print(global_shap)
+clipr::write_clip(global_shap)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# make sure groupx is a factor
+data1$groupx <- factor(data1$groupx)
+
+# fit model
+fit <- glm(
+  adj_DFDs2 ~ groupx * risk0,
+  family = binomial(),
+  data = data1
+)
+
+# levels of current groupx
+levs <- levels(data1$groupx)
+
+# grid of baseline risk
+grid <- data.frame(
+  risk0 = seq(
+    quantile(data1$risk0, 0.01, na.rm = TRUE),
+    quantile(data1$risk0, 0.99, na.rm = TRUE),
+    length.out = 200
+  )
+)
+
+invlogit <- function(x) 1 / (1 + exp(-x))
+
+# predicted curves for all levels of groupx
+plot_list <- lapply(levs, function(g) {
+  newdat <- grid
+  newdat$groupx <- factor(g, levels = levs)
+
+  pred <- predict(fit, newdata = newdat, type = "link", se.fit = TRUE)
+
+  data.frame(
+    risk0 = grid$risk0,
+    group = g,
+    fit = invlogit(pred$fit),
+    lo  = invlogit(pred$fit - 1.96 * pred$se.fit),
+    hi  = invlogit(pred$fit + 1.96 * pred$se.fit)
+  )
+})
+
+plot_dat <- bind_rows(plot_list)
+
+# turn long format data to wide format
+plot_dat_wide <- plot_dat %>%
+  pivot_wider(
+    id_cols = risk0,
+    names_from = group,
+    values_from = c(fit, lo, hi),
+    names_sep = "_"
+  )
+
+plot_dat_wide
+clipr::write_clip(plot_dat_wide)
+```
+
+```{r fig.height=5, fig.width=6}
+library(ggprism)
+my_cols <- c(
+  "Placebo" = "#d62728",
+  "Dex" = "#1f77b4",
+  "Dex 0.1 mcg/kg/h" = "#1f77b4",
+  "Dex 0.3 mcg/kg/h" = "darkgreen"
+)
+
+ggplot(plot_dat, aes(x = risk0, y = fit, color = group, fill = group)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.12, color = NA) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols) +
+  scale_x_continuous(
+    breaks = seq(0, 1, by = 0.1),
+    labels = percent_format(accuracy = 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.2),
+    limits = c(0, 1),
+    labels = percent_format(accuracy = 1)
+  ) +
+  labs(
+    x = "Predicted baseline risk",
+    y = "Predicted probability of poor DFD outcome",
+    color = NULL,
+    linetype = NULL,
+    fill = NULL
+  ) +
+  theme_prism(base_size = 12) +
+  theme(legend.position = "top") + 
+  ggtitle("Heterogeneity of treatment effect for in-hospital DFDs")
+```
+## Imputed ICU DFDs
+```{r}
+# HTE analysis for in-hosp DFDs
+# make adj_DFDs a binary variable: 0 if DFDs >7, 1 if DFDs <= 7
+data1$adj_ICU_DFDs2 = as.numeric(as.character(data1$adj_ICU_DFDs))
+data1$adj_ICU_DFDs2 = case_when(
+  data1$adj_ICU_DFDs2 > 3 ~ 0,
+  data1$adj_ICU_DFDs2 <= 3 ~ 1
+)
+
+
+risk_fit <- glm(
+  adj_ICU_DFDs2 ~ age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,
+  family = binomial(),
+  data = data1
+)
+summary(risk_fit)
+
+# table(data1$adj_DFDs2)
+# risk_fit <- glm(
+#   adj_ICU_DFDs2 ~ age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,
+#   family = binomial(),
+#   data = subset(data1, groupx == "Placebo")
+# )
+# summary(risk_fit)
+
+data1$risk0 <- predict(risk_fit, newdata = data1, type = "response")
+summary(data1$risk0)
+```
+
+```{r}
+hte_fit <- glm(
+  adj_ICU_DFDs2 ~ groupx * risk0,
+  family = binomial(),
+  data = data1
+)
+```
+
+```{r}
+# Install if needed:
+# install.packages(c("fastshap", "ggplot2", "dplyr", "tidyr"))
+
+library(fastshap)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# --------------------------------------------------
+#   Predictor matrix for SHAP
+# --------------------------------------------------
+X <- data1 %>%
+  select(
+    age,
+    mean_iqcode_score,
+    day_1_sofa_score,
+    delirium_status,
+    t_icu,
+    t_hosp
+  )
+
+# --------------------------------------------------
+#    Prediction wrapper
+#    Explain the model on the log-odds scale
+# --------------------------------------------------
+pred_wrapper_link <- function(object, newdata) {
+  out <- predict(object, newdata = newdata, type = "link")
+  unname(as.numeric(out))
+}
+
+# Sanity check
+tmp <- pred_wrapper_link(risk_fit, X)
+stopifnot(is.numeric(tmp), length(tmp) == nrow(X))
+
+# --------------------------------------------------
+# Compute SHAP values
+# --------------------------------------------------
+set.seed(123)
+
+shap_values <- fastshap::explain(
+  object = risk_fit,
+  X = X,
+  pred_wrapper = pred_wrapper_link,
+  nsim = 200,
+  adjust = TRUE
+)
+
+# --------------------------------------------------
+# Global SHAP importance
+# --------------------------------------------------
+global_shap <- data.frame(
+  feature = colnames(shap_values),
+  mean_abs_shap = apply(abs(as.matrix(shap_values)), 2, mean)
+) %>%
+  arrange(desc(mean_abs_shap))
+
+# relabel features
+global_shap$feature <- recode(global_shap$feature,
+  age = "Age",
+  mean_iqcode_score = "Mean IQCODE Score",
+  day_1_sofa_score = "Day 1 SOFA Score",
+  delirium_status = "Delirium Status",
+  t_icu = "Days in ICU Pre-enrollment",
+  t_hosp = "Days in Hospital Pre-enrollment"
+)
+
+# remove rownames
+rownames(global_shap) <- NULL
+
+print(global_shap)
+clipr::write_clip(global_shap)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# make sure groupx is a factor
+data1$groupx <- factor(data1$groupx)
+
+# fit model
+fit <- glm(
+  adj_ICU_DFDs2 ~ groupx * risk0,
+  family = binomial(),
+  data = data1
+)
+
+# levels of current groupx
+levs <- levels(data1$groupx)
+
+# grid of baseline risk
+grid <- data.frame(
+  risk0 = seq(
+    quantile(data1$risk0, 0.01, na.rm = TRUE),
+    quantile(data1$risk0, 0.99, na.rm = TRUE),
+    length.out = 200
+  )
+)
+
+invlogit <- function(x) 1 / (1 + exp(-x))
+
+# predicted curves for all levels of groupx
+plot_list <- lapply(levs, function(g) {
+  newdat <- grid
+  newdat$groupx <- factor(g, levels = levs)
+
+  pred <- predict(fit, newdata = newdat, type = "link", se.fit = TRUE)
+
+  data.frame(
+    risk0 = grid$risk0,
+    group = g,
+    fit = invlogit(pred$fit),
+    lo  = invlogit(pred$fit - 1.96 * pred$se.fit),
+    hi  = invlogit(pred$fit + 1.96 * pred$se.fit)
+  )
+})
+
+plot_dat <- bind_rows(plot_list)
+
+# turn long format data to wide format
+plot_dat_wide <- plot_dat %>%
+  pivot_wider(
+    id_cols = risk0,
+    names_from = group,
+    values_from = c(fit, lo, hi),
+    names_sep = "_"
+  )
+
+plot_dat_wide
+clipr::write_clip(plot_dat_wide)
+```
+
+```{r fig.height=5, fig.width=6}
+my_cols <- c(
+  "Placebo" = "#d62728",
+  "Dex" = "#1f77b4",
+  "Dex 0.1 mcg/kg/h" = "#1f77b4",
+  "Dex 0.3 mcg/kg/h" = "darkgreen"
+)
+
+ggplot(plot_dat, aes(x = risk0, y = fit, color = group, fill = group)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.12, color = NA) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols) +
+  scale_x_continuous(
+    breaks = seq(0, 1, by = 0.1),
+    labels = percent_format(accuracy = 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.2),
+    limits = c(0, 1),
+    labels = percent_format(accuracy = 1)
+  ) +
+  labs(
+    x = "Predicted baseline risk",
+    y = "Predicted probability of poor DFD outcome",
+    color = NULL,
+    linetype = NULL,
+    fill = NULL
+  ) +
+  theme_prism(base_size = 12) +
+  theme(legend.position = "top") + 
+  ggtitle("Heterogeneity of treatment effect for ICU DFDs")
+```
+
+

@@ -1,0 +1,1 @@
+This is a repository set up to create plots for vitals of all the patients in the ICU Sleep Cohort. In this repository we are trying to plot the vitals using Bedmaster data, HL7 messages and EDW data.

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Labels</key>
+	<string>Distribution plot of imputed and unimputed IH DFDs
+Number of Days
+Frequency Counts
+Histogram of adj_14day_DFDs
+Histogram of unadj_DFDs
+Imputed IH DFDs
+Unimputed IH DFDs
+</string>
+	<key>Text</key>
+	<string></string>
+</dict>
+</plist>

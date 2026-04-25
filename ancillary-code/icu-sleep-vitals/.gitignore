@@ -1,0 +1,14 @@
+.secret
+.DS_Store
+.vscode
+.idea/*
+*.egg-info
+*.linux
+*.log
+**/__pycache__/*
+*.egg-info
+.Rproj.user
+.ipynb_checkpoints
+.idea/
+*__pycache__*
+build/

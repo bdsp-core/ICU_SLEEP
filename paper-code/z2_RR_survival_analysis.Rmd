@@ -1,0 +1,435 @@
+---
+title: "Survival Analysis"
+output: 
+  html_notebook: 
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    theme: simplex
+    number_sections: true
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+---
+
+```{r warning=FALSE , message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(knitr)
+library(magrittr)
+library(janitor)
+library(readxl)
+options(scipen=999)
+library(readr)
+
+# set width of the output
+options(width = 120)
+```
+
+# Load data
+```{r}
+surv1 = readRDS("data/rds/surv1.rds")
+group = readRDS("data/rds/group.rds")
+demo = readRDS("data/rds/demo.rds")
+itt = readRDS("data/rds/itt.rds")
+# itt group does not contain keyword bolus
+itt = itt %>% filter(randomization_allocation_assignment_list %in% c("Dex 0.1 mcg/kg/h", "Dex 0.3 mcg/kg/h", "Placebo"))
+mitt = readRDS("data/rds/mitt.rds")
+pp = readRDS("data/rds/pp.rds")
+adj = demo %>% select(sid, age, sex, race, ethnicity)
+```
+
+# Apply analytical samples
+```{r}
+# use mitt
+surv1 = surv1 %>% filter(sid %in% mitt$sid)
+group = group %>% filter(sid %in% mitt$sid)
+# group2 to combine two Dex groups
+group$group2 = group$group %>% as.character()
+group$group2[group$group2 == "Dex 0.1 mcg/kg/h"] = "Dex"
+group$group2[group$group2 == "Dex 0.3 mcg/kg/h"] = "Dex"
+group$group2 = as.character(group$group2)
+
+
+# left join
+data1 = left_join(surv1, group, by = "sid")
+data1 = left_join(data1, adj, by = "sid")
+data1 = data1 %>% filter(sid %in% mitt$sid)
+```
+
+```{r}
+# set Placebo as the group reference
+data1$group = factor(data1$group)
+data1$group = relevel(data1$group, ref = "Placebo")
+
+data1$group2 = as.factor(data1$group2)
+data1$group2 = relevel(data1$group2, ref = "Placebo")
+
+#janitor::tabyl(outcome1$adj_DFDs)
+#janitor::tabyl(outcome1$unadj_DFDs)
+
+covariate = demo %>% 
+  select(sid, day_1_sofa_score, mean_iqcode_score, delirium_status,days_in_icu_pre_enrollment, days_in_hosp_pre_enrollment,obstructive_sleep_apnea_y_n,
+         med_prestudy_benzos_yn,med_prestudy_phenobarbital_yn)
+  
+data1 = left_join(data1, covariate, by = "sid")
+```
+
+```{r}
+# data1$delirium_status as 0/1
+data1$delirium_status = case_when(
+  data1$delirium_status == "N" ~ 0,
+  data1$delirium_status == "Y" ~ 1
+)
+
+```
+
+```{r}
+data1 = data1 %>% mutate(t_icu = days_in_icu_pre_enrollment)
+data1 = data1 %>% mutate(t_hosp = days_in_hosp_pre_enrollment)
+```
+
+```{r}
+# data1 - mean_iqcode_score is centered around 3 and very small sd, normalize it
+data1 <- data1 %>% mutate(mean_iqcode_score_z = as.numeric(scale(mean_iqcode_score)))
+```
+
+```{r}
+# this is settup group variables not important
+group = group %>% mutate(group3g = group, group2g = group2, groupx = group)
+# set group now
+group = group %>% select(-group, -group2)
+# in group now we only have groupx, which is different
+group$groupx = group$group2g
+#group$groupx = group$group3g
+```
+# choose 2 groups or 3 groups
+```{r}
+data1$group_2g = data1$group2
+data1$group_3g = data1$group
+data1 = data1 %>% select(-group2, -group)
+
+# now new groupx = 2g or 3g
+# data1 = data1 %>% mutate(groupx = group_2g)
+data1 = data1 %>% mutate(groupx = group_3g)
+
+adjust = " + age + mean_iqcode_score + delirium_status + t_icu + t_hosp"
+data1 = data1 %>% select(-group_2g,-group_3g)
+```
+
+
+Now we start analysis - distributions already checked up
+- primary analysis start here
+- group2 is group2g or group3g depending on the selection
+
+
+# DID datetime standardization
+```{r}
+# note: surv1 datatime fields were all standardized to a fake enrollment date.
+```
+
+# check dataset
+```{r}
+library(skimr)
+# glimpse(data1, width = 30)
+```
+
+
+```{r}
+pkgs <- c("tidyverse","lubridate","survival","ggsurvfit","broom","gtsummary", "survminer")
+invisible(lapply(setdiff(pkgs, rownames(installed.packages())), install.packages))
+invisible(lapply(pkgs, library, character.only = TRUE))
+```
+
+```{r}
+# ---- Hard QC: death cannot precede any known admission date ----
+qc_bad <- data1 %>%
+  filter(
+    (!is.na(death_date) & !is.na(hosp_admission_dts) & death_date < hosp_admission_dts) |
+    (!is.na(death_date) & !is.na(icu_admission_dts)  & death_date < icu_admission_dts)
+  ) %>%
+  select(sid, hosp_admission_dts, icu_admission_dts, death_date)
+
+if (nrow(qc_bad) > 0) {
+  print(qc_bad)
+  stop(sprintf("QC failed: %d rows have death_date earlier than admission. Fix these before analysis.", nrow(qc_bad)))
+}
+```
+
+# QA
+```{r}
+# set up dataset: add day14 cut to data but it's all data
+data1_14d <- data1 %>%
+  select(sid, groupx,
+         date_sda = date_time_first_study_drug_administration,
+         # date_enrolled, # we use date sda for calculation
+         death_date, 
+         age, mean_iqcode_score_z, delirium_status, t_icu, t_hosp, day_1_sofa_score,
+         icu_discharge_dts,hosp_discharge_dts) %>%
+  mutate(surv_raw_days = as.numeric(death_date - date_sda, units = "days"),
+         day14 = date_sda + days(14),
+         days_to_icu_discharge = as.numeric(icu_discharge_dts - date_sda, units = "days"),
+         days_to_hosp_discharge = as.numeric(hosp_discharge_dts - date_sda, units = "days")
+         )
+
+# how many death
+data1_14d %>% filter(!is.na(death_date)) %>% nrow()
+# how many death within 14 days
+data1_14d %>% filter(!is.na(death_date) & death_date < date_sda + days(14)) %>% nrow()
+# who died at between day 14 and day 15
+data1_14d %>% filter(!is.na(death_date) & death_date > date_sda + days(14) & death_date < date_sda + days(15)) %>% nrow()
+# x = data1_14d %>% filter(!is.na(death_date) & death_date > date_sda + days(14) & death_date <= date_sda + days(15))
+
+data1_death = data1_14d %>% filter(!is.na(death_date) & death_date < date_sda + days(14))
+
+# how many deaths within icu
+data1_death %>% filter(!is.na(death_date) & !is.na(icu_discharge_dts) & death_date <= icu_discharge_dts) %>% nrow()
+# x = data1_death %>% filter(!is.na(death_date) & !is.na(icu_discharge_dts) & death_date <= icu_discharge_dts)
+
+# how many died within 7 days but outside of icu
+data1_death %>% filter(death_date > icu_discharge_dts & death_date <= date_sda + days(7)) %>% nrow()
+
+# how many died within hospital
+data1_death %>% filter(!is.na(death_date) & !is.na(hosp_discharge_dts) & death_date <= hosp_discharge_dts) %>% nrow()
+
+# how many died within 14 days but outside of hospital
+data1_death %>% filter(death_date > hosp_discharge_dts & death_date <= date_sda + days(14)) %>% nrow()
+```
+# death plot
+```{r}
+# install if needed
+if (!requireNamespace("ggsci", quietly = TRUE)) install.packages("ggsci")
+if (!requireNamespace("ggprism", quietly = TRUE)) install.packages("ggprism")
+library(ggsci)
+library(ggprism)
+```
+
+```{r}
+library(clipr)
+# data1_14day has all mITT patients. rename to data2
+data2 = data1_14d
+data_icu_death = data2 %>% filter(!is.na(death_date) & !is.na(icu_discharge_dts) & death_date <= icu_discharge_dts)
+data_hosp_death = data2 %>% filter(!is.na(death_date) & !is.na(hosp_discharge_dts) & death_date <= hosp_discharge_dts)
+```
+
+# in hospital death plot data - 2g
+```{r}
+# calculate culmulative death sum of data_hosp_death
+hosp_death = data_hosp_death %>% select(sid, surv_raw_days, groupx) %>% arrange(surv_raw_days)
+days_dex <- hosp_death %>% filter(groupx == "Dex") %>% pull(surv_raw_days)
+day_placebo <- hosp_death %>% filter(groupx == "Placebo") %>% pull(surv_raw_days)
+max_day <- max(c(days_dex, day_placebo), na.rm = TRUE) %>% ceiling()
+# define the range of interest
+day_range <- 0:25
+# compute cumulative count at each day
+dex = cum_counts <- sapply(day_range, function(d) sum(days_dex <= d))
+placebo = cum_counts <- sapply(day_range, function(d) sum(day_placebo <= d))
+# combine into a data frame
+df_dex <- data.frame(day = day_range, cumulative_count = dex, group = "Dex")
+df_placebo <- data.frame(day = day_range, cumulative_count = placebo, group = "Placebo")
+df = rbind(df_dex, df_placebo)
+
+df_plot_wide = df %>% pivot_wider(names_from = group, values_from = cumulative_count) %>% arrange(day)
+write_clip(df_plot_wide) # copy to clipboard for datagraph plots
+```
+
+# in hospital death plot data - 3g
+```{r}
+# calculate culmulative death sum of data_hosp_death
+hosp_death = data_hosp_death %>% select(sid, surv_raw_days, groupx) %>% arrange(surv_raw_days)
+days_dex1 <- hosp_death %>% filter(groupx == "Dex 0.1 mcg/kg/h") %>% pull(surv_raw_days)
+days_dex2 <- hosp_death %>% filter(groupx == "Dex 0.3 mcg/kg/h") %>% pull(surv_raw_days)
+day_placebo <- hosp_death %>% filter(groupx == "Placebo") %>% pull(surv_raw_days)
+max_day <- max(c(days_dex1,days_dex2, day_placebo), na.rm = TRUE) %>% ceiling()
+# define the range of interest
+day_range <- 0:25
+# compute cumulative count at each day
+dex1 = cum_counts <- sapply(day_range, function(d) sum(days_dex1 <= d))
+dex2 = cum_counts <- sapply(day_range, function(d) sum(days_dex2 <= d))
+placebo = cum_counts <- sapply(day_range, function(d) sum(day_placebo <= d))
+# combine into a data frame
+df_dex1 <- data.frame(day = day_range, cumulative_count = dex1, group = "Dex 0.1 mcg/kg/h")
+df_dex2 <- data.frame(day = day_range, cumulative_count = dex2, group = "Dex 0.3 mcg/kg/h")
+df_placebo <- data.frame(day = day_range, cumulative_count = placebo, group = "Placebo")
+df = rbind(df_dex1, df_dex2, df_placebo)
+
+df_plot_wide = df %>% pivot_wider(names_from = group, values_from = cumulative_count) %>% arrange(day)
+write_clip(df_plot_wide) # copy to clipboard for datagraph plots
+```
+
+# in ICU death plot data-2g
+```{r}
+# calculate culmulative death sum of data_icu_death
+icu_death = data_icu_death %>% select(sid, surv_raw_days, groupx) %>% arrange(surv_raw_days)
+days_dex <- icu_death %>% filter(groupx == "Dex") %>% pull(surv_raw_days)
+day_placebo <- icu_death %>% filter(groupx == "Placebo") %>% pull(surv_raw_days)
+max_day <- max(c(days_dex, day_placebo), na.rm = TRUE) %>% ceiling()
+# define the range of interest
+day_range <- 0:20
+# compute cumulative count at each day
+dex = cum_counts <- sapply(day_range, function(d) sum(days_dex <= d))
+placebo = cum_counts <- sapply(day_range, function(d) sum(day_placebo <= d))
+# combine into a data frame
+df_dex <- data.frame(day = day_range, cumulative_count = dex, group = "Dex")
+df_placebo <- data.frame(day = day_range, cumulative_count = placebo, group = "Placebo")
+df = rbind(df_dex, df_placebo)
+
+df_plot_wide = df %>% pivot_wider(names_from = group, values_from = cumulative_count) %>% arrange(day)
+write_clip(df_plot_wide) # copy to clipboard for datagraph plots
+```
+
+# in ICU death plot data-3g
+```{r}
+# calculate culmulative death sum of data_icu_death
+icu_death = data_icu_death %>% select(sid, surv_raw_days, groupx) %>% arrange(surv_raw_days)
+days_dex1 <- icu_death %>% filter(groupx == "Dex 0.1 mcg/kg/h") %>% pull(surv_raw_days)
+days_dex2 <- icu_death %>% filter(groupx == "Dex 0.3 mcg/kg/h") %>% pull(surv_raw_days)
+day_placebo <- icu_death %>% filter(groupx == "Placebo") %>% pull(surv_raw_days)
+max_day <- max(c(days_dex1,days_dex2, day_placebo), na.rm = TRUE) %>% ceiling()
+# define the range of interest
+day_range <- 0:20
+# compute cumulative count at each day
+dex1 = cum_counts <- sapply(day_range, function(d) sum(days_dex1 <= d))
+dex2 = cum_counts <- sapply(day_range, function(d) sum(days_dex2 <= d))
+placebo = cum_counts <- sapply(day_range, function(d) sum(day_placebo <= d))
+# combine into a data frame
+df_dex1 <- data.frame(day = day_range, cumulative_count = dex1, group = "Dex 0.1 mcg/kg/h")
+df_dex2 <- data.frame(day = day_range, cumulative_count = dex2, group = "Dex 0.3 mcg/kg/h")
+df_placebo <- data.frame(day = day_range, cumulative_count = placebo, group = "Placebo")
+df = rbind(df_dex1, df_dex2, df_placebo)
+
+df_plot_wide = df %>% pivot_wider(names_from = group, values_from = cumulative_count) %>% arrange(day)
+write_clip(df_plot_wide) # copy to clipboard for datagraph plots
+```
+
+# survival analysis till day 30
+Why?: almost all in-hospital and in-ICU death happen within 30 days. So it's more meaningful to look at survival curve within 30 days. 
+```{r}
+data3 = data1_14d
+
+library(dplyr)
+library(lubridate)
+
+max_followup <- 30
+data3_30d <- data3 %>%
+  mutate(
+    # Determine the censor/event date capped at 30 days
+    surv_end_date = pmin(death_date, date_sda + days(max_followup), na.rm = TRUE),
+    
+    # Event: death occurs within 30 days
+    event_30d = as.integer(!is.na(death_date) & death_date <= date_sda + days(max_followup)),
+    
+    # Time in days from enrollment to event/censor
+    time_30d = as.numeric(surv_end_date - date_sda, units = "days")
+  ) %>%
+  filter(!is.na(time_30d) & time_30d >= 0)
+
+# table(data3_30d$event_30d)
+# summary(data3_30d$time_30d)
+```
+
+
+```{r}
+data3_30d_death = data3_30d %>% filter(event_30d == 1)
+# boxplot data of survival days by groupx
+boxplot_data = data3_30d_death %>% select(groupx, time_30d)
+boxplot_data_wide = boxplot_data %>% pivot_wider(names_from = groupx, values_from = time_30d)
+write_clip(boxplot_data) # copy to clipboard for datagraph plots
+```
+
+
+
+```{r}
+library(survival)
+
+surv_obj_30d <- with(data3_30d, Surv(time_30d, event_30d))
+km_fit_30d  <- survfit(surv_obj_30d ~ groupx, data = data3_30d)
+
+# Inspect survival probabilities at selected times
+summary(km_fit_30d, times = c(1, 3, 7, 14, 21, 28, 30))
+
+# Test difference between groups
+logrank_test = survdiff(surv_obj_30d ~ groupx, data = data3_30d)
+print(logrank_test)
+
+library(broom)
+tidy_km <- broom::tidy(km_fit_30d)
+
+# turn it into wide format by strata
+tidy_km_wide <- tidy_km %>%
+  select(strata, time, n.risk, n.event, n.censor, estimate,, conf.high, conf.low) %>%
+  pivot_wider(names_from = strata, values_from = c(n.risk, n.event, estimate, conf.high, conf.low)) %>%
+  arrange(time)
+# copy
+write_clip(tidy_km_wide) # copy to clipboard for datagraph plots
+```
+
+
+```{r}
+cox_fit_30d <- coxph(surv_obj_30d ~ groupx + age + day_1_sofa_score + mean_iqcode_score_z + delirium_status + t_icu + t_hosp, data = data3_30d)
+summary(cox_fit_30d)
+```
+
+```{r fig.height=8, fig.width=6}
+library(survminer)
+library(ggsci)
+library(ggprism)
+
+# Palette for groups
+# manually green, blue, red for Dex 0.3, 0.1, placebo
+palette_groups <- c("Dex" = "#0072B5FF","Dex 0.3 mcg/kg/h" = "#20854EFF", "Dex 0.1 mcg/kg/h" = "#0072B5FF", "Placebo" = "#BC3C29FF")
+# palette_groups <- c( "Placebo" = "#BC3C29FF")
+
+km_plot_30d <- ggsurvplot(
+  km_fit_30d,
+  data = data3_30d,
+  conf.int = TRUE,
+  risk.table = TRUE,
+  censor = TRUE,
+  palette = palette_groups,
+  ggtheme = theme_minimal(),
+  title = "",
+  xlab = "Days since first study drug administration",
+  ylab = "Survival probability",
+  ylim = c(0.85, 1),
+  xlim = c(0, max_followup),
+  break.time.by = 7,
+  risk.table.height = 0.22,
+  risk.table.y.text = TRUE,
+  risk.table.col = "black",
+  legend.title = "",
+  legend.labs = levels(data3_30d$groupx)
+)
+
+# Style the survival curve panel
+km_plot_30d$plot <- km_plot_30d$plot +
+  ggprism::theme_prism(base_size = 12) +
+  theme(
+    legend.position = "top",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  geom_vline(xintercept = c(7, 14, 21, 28),
+             linetype = "dotted", linewidth = 0.6, color = "grey30")
+
+# Style the risk table
+km_plot_30d$table <- km_plot_30d$table +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+print(km_plot_30d)
+```
+
+
+
+
+
+
+

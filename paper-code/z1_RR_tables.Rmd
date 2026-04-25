@@ -1,0 +1,808 @@
+---
+title: "Descriptive Tables"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    theme: simplex
+    number_sections: true
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+  html_document:
+    toc: true
+    toc_depth: '4'
+    df_print: paged
+---
+
+```{r warning=FALSE, message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(sjPlot)
+library(knitr)
+library(magrittr)
+library(gtsummary)
+library(janitor)
+```
+
+# Data Setup 
+```{r}
+# Load data from pre-processed clean rds files
+# file path -> "data/rds/xxx"
+demo <- readRDS("data/rds/demo.rds")
+locations = readRDS("data/rds/locations.rds")
+group <- readRDS("data/rds/group.rds")
+itt <- readRDS("data/rds/itt_full.rds")
+surv <- readRDS("data/rds/surv1.rds") # load survival related data
+
+# Create main data file for tables
+demo = left_join(demo, group, by = "sid") # add group variable
+demo = left_join(demo, surv, by = "sid") # add surv variables
+demo = left_join(demo, locations, by = "sid") # add location variables
+```
+
+```{r}
+# Sanity check: print out the data statistics
+tabyl(group$group) # table out group assignment
+tabyl(itt$randomized) # table out randomized
+tabyl(itt$received_study_drug_any_amount_y_n) # table out received study drug
+tabyl(itt$analysis_population_m_itt) # table out mITT population
+tabyl(itt$analysis_population_pp) # table out PP population
+tabyl(itt$analysis_population_safety) # table out safety population
+```
+# mITT analytical set
+```{r}
+# analytical sets
+mitt = itt %>% filter(analysis_population_m_itt == 'Y') # ITT
+itt_standard = itt %>% filter(randomized == 'Y' & received_study_drug_any_amount_y_n == 'Y') # mITT
+pp = itt %>% filter(analysis_population_pp == 'Y') # per protocol
+
+# save
+saveRDS(mitt, "data/rds/mitt.rds")
+saveRDS(itt_standard, "data/rds/itt.rds")
+saveRDS(pp, "data/rds/pp.rds")
+```
+
+# Use mITT set
+```{r}
+# define sample
+sample = mitt
+# we can assign other options if we want to double check:
+  # sample = itt
+  # sample = pp
+
+# Create table using tableone
+demo = demo %>% filter(sid %in% sample$sid)
+
+# for all variable like "med_prestudy_" or "med_duringstudy_":
+# we will create a new binary variable that indicate if value>0, and create new variables with "_yn", but value as 0/1
+
+new_yn_vars = c(
+  "med_prestudy_opioids_yn",
+  "med_prestudy_benzos_yn",
+  "med_prestudy_phenobarbital_yn",
+  "med_prestudy_chlordiazepoxide_yn",
+  "med_prestudy_antipsychotics_yn",
+  "med_prestudy_propofol_yn",
+  "med_prestudy_ketamine_yn",
+  "med_prestudy_dexmedetomidine_yn",
+  "med_prestudy_melatonin_yn",
+  
+  "med_duringstudy_opioids_yn",
+  "med_duringstudy_benzos_yn",
+  "med_duringstudy_phenobarbital_yn",
+  "med_duringstudy_chlordiazepoxide_yn",
+  "med_duringstudy_antipsychotics_yn",
+  "med_duringstudy_propofol_yn",
+  "med_duringstudy_ketamine_yn",
+  "med_duringstudy_dexmedetomidine_yn",
+  "med_duringstudy_melatonin_yn"
+)
+```
+
+# Set up table data 
+```{r}
+# Set up Table 1 as tdata
+tdata = demo
+
+# combine Dex group together -> 2 groups
+tdata$group2g = case_when(
+  tdata$group == "Dex 0.1 mcg/kg/h" ~ "Dex",
+  tdata$group == "Dex 0.3 mcg/kg/h" ~ "Dex",
+  TRUE ~ tdata$group
+)
+# placebo as ref
+tdata$group2g <- relevel(factor(tdata$group2g), ref = "Placebo")
+
+# def 3groups
+tdata = tdata %>% rename(group3g = group)
+tdata$group3g <- relevel(factor(tdata$group3g), ref = "Placebo")
+```
+
+# select 2g or 3g groups
+```{r}
+# then correctly mark 2 groups vs 3 groups
+tdata = tdata %>% mutate(groupx = group2g) # --> 2 groups
+# tdata = tdata %>% mutate(groupx = group3g) # --> 3 groups
+```
+
+```{r}
+# additional clean up
+
+# re-level them use "N" as the reference group
+tdata$cardiac_dysfunction = relevel(factor(tdata$cardiac_dysfunction), ref = "N")
+tdata$delirium_status = relevel(factor(tdata$delirium_status), ref = "N")
+tdata$obstructive_sleep_apnea_y_n = relevel(factor(tdata$obstructive_sleep_apnea_y_n), ref = "N")
+tdata$history_of_depression_y_n = relevel(factor(tdata$history_of_depression_y_n), ref = "N")
+tdata$any_location_surgical = relevel(factor(tdata$any_location_surgical), ref = "N")
+
+# also recode all med ... yn variables to factor and use N as the reference group, use case_when
+tdata <- tdata %>%
+  mutate(across(
+    .cols = new_yn_vars,
+    .fns = ~ factor(
+      case_when(
+        . == 0 ~ "N",
+        . == 1 ~ "Y",
+        TRUE    ~ NA_character_  # in case of missing or unexpected values
+      ),
+      levels = c("N", "Y")
+    )
+  ))
+```
+
+```{r}
+# set up variables
+baseline_vars = c(
+  "age",
+  "sex",
+  "race",
+  "ethnicity",
+  "education",
+  "mean_iqcode_score",
+  "cci_cci_score_weighted",
+  "lawton_iadl_total_score_0_8",
+  "primary_diagnosis",
+  "weight",
+  "day_1_sofa_score",
+  "cardiac_dysfunction",
+  "nrs_sleep_score",
+  "delirium_status",
+  "obstructive_sleep_apnea_y_n",
+  "history_of_depression_y_n",
+  "extubation_status",
+  "any_location_surgical",
+  "days_in_icu_pre_enrollment",
+  "days_in_hosp_pre_enrollment",
+  
+  "med_prestudy_opioids_yn",
+  "med_prestudy_benzos_yn",
+  "med_prestudy_phenobarbital_yn",
+  "med_prestudy_chlordiazepoxide_yn",
+  "med_prestudy_antipsychotics_yn",
+  "med_prestudy_propofol_yn",
+  "med_prestudy_ketamine_yn",
+  "med_prestudy_dexmedetomidine_yn",
+  "med_prestudy_melatonin_yn"
+)
+
+during_vars = c(
+  "icu_los_for_icu_admission_during_which_the_pt_was_enrolled",
+  "hosp_los",
+  "deposition_outcome",
+  "mortality_in_icu",
+  "survival_days_in_icu",
+  "mortality_in_hosp",
+  "survival_days_in_hosp",
+  "days_from_date_time_enrolled_to_date_time_death",
+  "days_from_date_time_first_study_drug_administration_to_date_time_death",
+  "mortality_within_14d_from_date_enrolled",
+  "mortality_within_14d_from_first_med_adm",
+  "mortality_within_12_months_from_date_enrolled",
+  "readmit_30d_discharge",
+  "med_duringstudy_opioids_yn",
+  "med_duringstudy_benzos_yn",
+  "med_duringstudy_phenobarbital_yn",
+  "med_duringstudy_chlordiazepoxide_yn",
+  "med_duringstudy_antipsychotics_yn",
+  "med_duringstudy_propofol_yn",
+  "med_duringstudy_ketamine_yn",
+  "med_duringstudy_dexmedetomidine_yn",
+  "med_duringstudy_melatonin_yn",
+  "adj_icu_coma_days",
+  "adj_in_hosp_coma_days"
+)
+
+# names(demo) %>% dput() # output for check
+```
+
+```{r}
+# add labels
+library(labelled)
+tdata <- tdata %>% set_variable_labels(
+         age = "Age, years",
+         sex = "Sex, female",
+         race = " Race",
+         ethnicity = "Ethnicity",
+         education = "Education, years",
+         mean_iqcode_score = "IQCODE-SF score (1-5)",
+         cci_cci_score_weighted = "CCI score (weighted)",
+         lawton_iadl_total_score_0_8 = "Lawton iADL total score (0-8)",
+         primary_diagnosis = "Primary diagnosis for ICU admission",
+         weight = "Weight, kg",
+         day_1_sofa_score = "SOFA score (0-24) at enrollment",
+         cardiac_dysfunction = "Presence of any significant reported cardiac dysfunction",
+         nrs_sleep_score = " NRS-Sleep score (0-10) for sleep quality",
+         obstructive_sleep_apnea_y_n = "Obstructive sleep apnea (OSA) diagnosis",
+         history_of_depression_y_n = "History of depression",
+         extubation_status = "Non-intubated at enrollment",
+         delirium_status = "Delirious or coma on day of enrollment",
+         any_location_surgical = "Admitted to a surgical ICU at enrollment",
+         days_in_icu_pre_enrollment = "Days in ICU pre-enrollment",
+         days_in_hosp_pre_enrollment = "Days in hospital pre-enrollment",
+         
+         med_prestudy_opioids_yn = "Prestudy Opioids",
+         med_prestudy_benzos_yn = "Prestudy Benzodiazepines",
+         med_prestudy_phenobarbital_yn = "Prestudy Phenobarbital",
+         med_prestudy_chlordiazepoxide_yn = "Prestudy Chlordiazepoxide",
+         med_prestudy_antipsychotics_yn = "Prestudy Antipsychotics",
+         med_prestudy_propofol_yn = "Prestudy Propofol",
+         med_prestudy_ketamine_yn = "Prestudy Ketamine",
+         med_prestudy_dexmedetomidine_yn = "Prestudy Dexmedetomidine",
+         med_prestudy_melatonin_yn = "Prestudy Melatonin",
+         
+         mortality_within_14d_from_date_enrolled = "Mortality within 14 days from date enrolled",
+         mortality_within_14d_from_first_med_adm = "Mortality within 14 days from first study drug adm",
+         days_from_date_time_enrolled_to_date_time_death = "Days from enrollment to death",
+         days_from_date_time_first_study_drug_administration_to_date_time_death = "Days from first study drug admin to death",
+         mortality_in_icu = "Mortality in ICU",
+         mortality_in_hosp = "Mortality in Hospital",
+         mortality_within_12_months_from_date_enrolled = "Mortality within 12 months from date enrolled",
+         readmit_30d_discharge = "Readmission within 30 days from discharge",
+         adj_in_hosp_coma_days = "Adjusted In-hospital Coma Days",
+         adj_icu_coma_days = "Adjusted ICU Coma Days",
+         icu_los_for_icu_admission_during_which_the_pt_was_enrolled = "ICU LOS",
+         hosp_los = "In-Hospital LOS",
+         deposition_outcome = "Deposition Outcome",
+         
+         survival_days_in_icu = "If died, Survival Days in ICU",
+         survival_days_in_hosp = "If died, Survival Days in Hospital",
+         
+         med_duringstudy_opioids_yn = "During-study Opioids",
+         med_duringstudy_benzos_yn = "During-study Benzodiazepines",
+         med_duringstudy_phenobarbital_yn = "During-study Phenobarbital",
+         med_duringstudy_chlordiazepoxide_yn = "During-study Chlordiazepoxide",
+         med_duringstudy_antipsychotics_yn = "During-study Antipsychotics",
+         med_duringstudy_propofol_yn = "During-study Propofol",
+         med_duringstudy_ketamine_yn = "During-study Ketamine",
+         med_duringstudy_dexmedetomidine_yn = "During-study Dexmedetomidine",
+         med_duringstudy_melatonin_yn = "During-study Melatonin"
+)
+```
+
+```{r}
+# set variables
+norm_var = c(
+  "mean_iqcode_score",
+  "cci_cci_score_weighted"
+)
+
+nonnorm_var = c(
+  "age",
+  "education",
+  "lawton_iadl_total_score_0_8",
+  "weight",
+  "day_1_sofa_score",
+  "cardiac_dysfunction",
+  "adj_in_hosp_coma_days",
+  "adj_icu_coma_days",
+  "nrs_sleep_score",
+  "weight",
+  "days_in_icu_pre_enrollment",
+  "days_in_hosp_pre_enrollment",
+  "icu_los_for_icu_admission_during_which_the_pt_was_enrolled",
+  "hosp_los",
+  "survival_days_in_icu",
+  "survival_days_in_hosp",
+  "days_from_date_time_enrolled_to_date_time_death",
+  "days_from_date_time_first_study_drug_administration_to_date_time_death"
+)
+
+cat_var = c(
+  "sex",
+  "race",
+  "ethnicity",
+  "primary_diagnosis",
+  "cardiac_dysfunction",
+  "delirium_status",
+  "obstructive_sleep_apnea_y_n",
+  "history_of_depression_y_n",
+  "extubation_status",
+  "any_location_surgical",
+  "deposition_outcome",
+  "mortality_within_14d_from_date_enrolled",
+  "mortality_within_12_months_from_date_enrolled",
+  "readmit_30d_discharge",
+  "mortality_in_icu",
+  "mortality_in_hosp",
+  "adj_in_hosp_coma_days", # very few levels
+  "adj_icu_coma_days" # very few levels
+)
+
+cat_var = c(cat_var,new_yn_vars)
+```
+
+# Table 1 & 2
+```{r}
+# Create table using tableone
+
+table1 = CreateTableOne(vars = baseline_vars, data = tdata, factorVars = cat_var, strata = "groupx")
+table1p = print(table1, nonnormal = nonnorm_var, normal = norm_var, smd = T, , test = F, catDigits = 1, contDigits = 1,showAllLevels = F,
+                varLabels = T)
+table1p = print(table1, nonnormal = nonnorm_var, normal = norm_var, smd = F, , test = T, catDigits = 1, contDigits = 1,showAllLevels = F,
+                varLabels = T)
+
+# cleanup table1 and table1p from memory to avoid confusion
+rm(table1, table1p)
+```
+# table 3
+```{r}
+table1 = CreateTableOne(vars = during_vars, data = tdata, factorVars = cat_var, strata = "groupx", test = F)
+table1p = print(table1, nonnormal = nonnorm_var, normal = norm_var, smd = F, catDigits = 1, contDigits = 1,showAllLevels = F,
+                varLabels = T)
+# cleanup table1 and table1p from memory to avoid confusion
+rm(table1, table1p)
+```
+
+# table 3 regressions
+```{r}
+# during_vars %>% dput()
+
+yn_vars = c("mortality_in_icu", "mortality_within_14d_from_date_enrolled", "mortality_within_14d_from_first_med_adm",
+"mortality_in_hosp", "mortality_within_12_months_from_date_enrolled", "readmit_30d_discharge",
+"med_duringstudy_opioids_yn", "med_duringstudy_benzos_yn", 
+"med_duringstudy_phenobarbital_yn", "med_duringstudy_chlordiazepoxide_yn", 
+"med_duringstudy_antipsychotics_yn", "med_duringstudy_propofol_yn", 
+"med_duringstudy_ketamine_yn", "med_duringstudy_dexmedetomidine_yn", 
+"med_duringstudy_melatonin_yn")
+
+num_vars = c("survival_days_in_icu", "survival_days_in_hosp", "adj_in_hosp_coma_days", "adj_icu_coma_days")
+```
+
+```{r}
+library(gtsummary)
+library(gt)
+
+# set up regression data --> tdata2
+tdata2 = tdata
+# function to recode Y/N to 1/0
+recode_yn_to_binary <- function(x) {
+  case_when(
+    x == "Y" ~ 1,
+    x == "N" ~ 0,
+    TRUE      ~ NA_real_  # in case of missing or unexpected values
+  )
+}
+
+# do that to all during_vars that are in cat_var
+for (var in during_vars) {
+  if (var %in% yn_vars) {
+    tdata2[[var]] <- recode_yn_to_binary(tdata2[[var]])
+  }
+}
+
+# deceased as ref
+tdata2$deposition_outcome <- relevel(factor(tdata2$deposition_outcome), ref = "Deceased")
+
+# factor adj_in_hosp_coma_days as 0->14 levels
+tdata2$adj_in_hosp_coma_days_cat <- factor(tdata2$adj_in_hosp_coma_days,ordered = T, levels = c(0,1,2,4,8))
+tdata2$adj_icu_coma_days_cat <- factor(tdata2$adj_icu_coma_days,ordered = T, levels = c(0,1,2,3))
+```
+
+##  Length of stay in ICU
+```{r}
+mod_nb_icu <- MASS::glm.nb(
+  icu_los_for_icu_admission_during_which_the_pt_was_enrolled ~ groupx,
+  data = tdata2
+)
+
+tbl_regression(
+  mod_nb_icu,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>% 
+  modify_header(estimate = "**IRR (95% CI)**") %>%
+  as_gt() %>%
+  gt::tab_header(title = "ICU LOS")
+```
+
+## In-hospital LOS
+```{r}
+mod_nb_hosp <- MASS::glm.nb(
+  hosp_los ~ groupx,
+  data = tdata2
+)
+
+tbl_regression(
+  mod_nb_hosp,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>% 
+  modify_header(estimate = "**IRR (95% CI)**") %>%
+  as_gt() %>%
+  gt::tab_header(title = "Hospital LOS")
+```
+
+##  Disposition outcome
+```{r}
+library(nnet)
+mod_multi <- multinom(deposition_outcome ~ groupx, data = tdata2)
+
+tidy_multi <- broom::tidy(
+  mod_multi,
+  conf.int = TRUE,
+  conf.level = 0.95,
+)
+
+tidy_multi = tidy_multi %>% mutate(
+    OR      = round(exp(estimate), 3),
+    CI_low  = round(exp(conf.low), 3),
+    CI_high = round(exp(conf.high), 3),
+    p.value = round(p.value, 3),
+    formatted = sprintf(
+      "%.3f [%.3f, %.3f]",
+      OR, CI_low, CI_high, p.value
+    )
+  )
+tidy_multi %>% 
+  select(y.level, formatted, OR, CI_low, CI_high, p.value, term) %>% 
+  filter(term == "groupxDex") %>%
+  arrange(y.level)
+```
+
+## mortality in ICU
+```{r}
+# mortality_in_icu
+mod1 <- glm(mortality_in_icu ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod1,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "Mortality in ICU")
+```
+## mortality in hospital
+```{r}
+tdata2$mortality_in_hosp %>% table()
+
+# mortality_in_hosp
+mod3 <- glm(mortality_in_hosp ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod3,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "mortality_in_hosp")
+```
+
+## days from enrollment to death
+```{r}
+tdata2$enroll_death_days = round(tdata2$enroll_death_days,0)
+# days_enroll_death
+mod_e_d_days <- MASS::glm.nb(enroll_death_days ~ groupx, tdata2)
+tbl_regression(
+  mod_e_d_days,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "days_enroll_death")
+```
+## days from first drug to death
+```{r}
+tdata2$first_drug_death_days = round(tdata2$first_drug_death_days,0)
+# first drug death days
+mod_fd_d_days <- MASS::glm.nb(first_drug_death_days ~ groupx, tdata2)
+tbl_regression(
+  mod_fd_d_days,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "first_drug_death_days")
+```
+
+## mortality within 14 days from enrollment
+```{r}
+# mortality_within_14d_from_date_enrolled
+mod2 <- glm(mortality_within_14d_from_date_enrolled ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod2,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "mortality_within_14d_from_date_enrolled")
+```
+
+## mortality within 14 days from first study drug admin
+```{r}
+# mortality_within_14d_from_date_enrolled
+mod2 <- glm(mortality_within_14d_from_first_med_adm ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod2,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "mortality_within_14d_from_first_med_adm")
+```
+
+## mortality within 12 months from enrollment
+```{r}
+# mortality_within_12_months_from_date_enrolled
+mod4 <- glm(mortality_within_12_months_from_date_enrolled ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod4,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "mortality_within_12_months_from_date_enrolled")
+```
+
+## readmission 30-day
+```{r}
+table(tdata2$readmit_30d_discharge)
+mod_readmit <- glm(readmit_30d_discharge ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod_readmit,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "readmit_30d_discharge")
+```
+
+```{r}
+# histogram data for these 4 variables
+hist_data = tdata2 %>%
+  select(sid,groupx ,survival_days_in_icu, survival_days_in_hosp, adj_in_hosp_coma_days, adj_icu_coma_days)
+clipr::write_clip(hist_data)
+
+# additional checks
+
+#hist(tdata2$adj_in_hosp_coma_days)
+#table(tdata2$adj_in_hosp_coma_days)
+#hist(tdata2$adj_icu_coma_days)
+#table(tdata2$adj_icu_coma_days)
+
+# no point to run the first two due to limited numbers of events, but we can run the last two
+
+# # survival_days_in_icu
+# mod5 <- lm(survival_days_in_icu ~ group2, tdata2)
+# tbl_regression(
+#   mod5,
+#   estimate_fun = ~ style_number(.x, digits = 3),
+#   pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+#   as_gt() %>%
+#   gt::tab_header(title = "survival_days_in_icu")
+# 
+# # survival_days_in_hosp
+# mod6 <- lm(survival_days_in_hosp ~ group2, tdata2)
+# tbl_regression(
+#   mod6,
+#   estimate_fun = ~ style_number(.x, digits = 3),
+#   pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+#   as_gt() %>%
+#   gt::tab_header(title = "survival_days_in_hosp")
+```
+
+## medication models
+```{r}
+# med_duringstudy_opioids_yn
+mod9 <- glm(med_duringstudy_opioids_yn ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod9,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "Opioids during study (Y/N)")
+
+# med_duringstudy_benzos_yn
+mod10 <- glm(med_duringstudy_benzos_yn ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod10,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "Benzodiazepines during study (Y/N)")
+
+# "med_duringstudy_phenobarbital_yn"
+mod11 <- glm(med_duringstudy_phenobarbital_yn ~ groupx, tdata2, family = binomial)
+tbl_regression(
+  mod11,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "Phenobarbital during study (Y/N)")
+
+# "med_duringstudy_chlordiazepoxide_yn", 
+mod_chlordiazepoxide <- glm(
+  med_duringstudy_chlordiazepoxide_yn ~ groupx,
+  data = tdata2,
+  family = binomial
+)
+
+tbl_chlordiazepoxide <- tbl_regression(
+  mod_chlordiazepoxide,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("chlordiazepoxide during study (Y/N): Odds Ratios")
+  )
+
+tbl_chlordiazepoxide
+
+# "med_duringstudy_antipsychotics_yn", 
+mod_antipsychotics <- glm(
+  med_duringstudy_antipsychotics_yn ~ groupx,
+  data = tdata2,
+  family = binomial
+)
+
+tbl_antipsychotics <- tbl_regression(
+  mod_antipsychotics,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("antipsychotics during study (Y/N): Odds Ratios")
+  )
+
+tbl_antipsychotics
+
+# "med_duringstudy_propofol_yn", 
+mod_propofol <- glm(
+  med_duringstudy_propofol_yn ~ groupx,
+  data = tdata2,
+  family = binomial
+)
+
+tbl_propofol <- tbl_regression(
+  mod_propofol,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("propofol during study (Y/N): Odds Ratios")
+  )
+
+tbl_propofol
+
+# "med_duringstudy_ketamine_yn", 
+mod_ketamine <- glm(
+  med_duringstudy_ketamine_yn ~ groupx,
+  data = tdata2,
+  family = binomial
+)
+
+tbl_ketamine <- tbl_regression(
+  mod_ketamine,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("ketamine during study (Y/N): Odds Ratios")
+  )
+
+tbl_ketamine
+
+# "med_duringstudy_dexmedetomidine_yn", 
+mod_dexmedetomidine <- glm(
+  med_duringstudy_dexmedetomidine_yn ~ groupx,
+  data = tdata2,
+  family = binomial
+)
+
+tbl_dexmedetomidine <- tbl_regression(
+  mod_dexmedetomidine,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("dexmedetomidine during study (Y/N): Odds Ratios")
+  )
+
+tbl_dexmedetomidine
+
+# "med_duringstudy_melatonin_yn"
+mod_melatonin <- glm(
+  med_duringstudy_melatonin_yn ~ groupx,
+  data = tdata2,
+  family = binomial
+)
+
+tbl_melatonin <- tbl_regression(
+  mod_melatonin,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("melatonin during study (Y/N): Odds Ratios")
+  )
+
+tbl_melatonin
+```
+
+## adj_in_hosp_coma_days
+```{r}
+# adj_in_hosp_coma_days --> imputed hospital coma days
+# multinomial model
+library(ordinal)
+mod7 <- clm(adj_in_hosp_coma_days_cat ~ groupx, data = tdata2, link = "logit")
+# run brant test to check proportional odds assumption
+# gofcat::brant.test(mod7)
+# scale_test(mod7)
+
+tbl_mod7 <- tbl_regression(
+  mod7,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(title = "imputed hospital coma days (clm logit ORs)")
+
+tbl_mod7
+```
+
+## adj_icu_coma_days
+```{r}
+# adj_icu_coma_days --> imputed icu coma days
+mod8 <- clm(adj_icu_coma_days_cat ~ groupx, data = tdata2, link = "logit")
+# run brant test to check proportional odds assumption
+# gofcat::brant.test(mod8)
+# scale_test(mod8)
+
+tbl_mod8 <- tbl_regression(
+  mod8,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(title = "imputed icu coma days (clm logit ORs)")
+tbl_mod8
+```
+
+
+
+
+
+
+
+
+

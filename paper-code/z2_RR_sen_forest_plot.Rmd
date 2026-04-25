@@ -1,0 +1,406 @@
+---
+title: "Sensitivity analysis: forest plot"
+output: 
+  html_notebook: 
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    theme: simplex
+    number_sections: true
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+---
+
+```{r warning=FALSE , message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(knitr)
+library(magrittr)
+library(janitor)
+library(readxl)
+library(ordinal)  # for clm()
+library(clipr)    # for write_clip()
+options(scipen=999)
+library(readr)
+
+# set width of the output
+options(width = 120)
+```
+
+# Load data
+```{r}
+outcome1 = readRDS("data/rds/outcome1.rds")
+group = readRDS("data/rds/group.rds")
+demo = readRDS("data/rds/demo.rds")
+itt = readRDS("data/rds/itt.rds")
+# sanity check: itt group does not contain keyword bolus
+# itt = itt %>% filter(randomization_allocation_assignment_list %in% c("Dex 0.1 mcg/kg/h", "Dex 0.3 mcg/kg/h", "Placebo"))
+# pp = readRDS("data/rds/pp.rds")
+mitt = readRDS("data/rds/mitt.rds")
+adj = demo %>% select(sid, age, sex, race, ethnicity)
+```
+
+# Apply analytical samples
+```{r}
+# use mitt
+outcome1 = outcome1 %>% filter(sid %in% mitt$sid)
+group = group %>% filter(sid %in% mitt$sid)
+
+# group2 to combine two Dex groups
+group$group2 = group$group %>% as.character()
+group$group2[group$group2 == "Dex 0.1 mcg/kg/h"] = "Dex"
+group$group2[group$group2 == "Dex 0.3 mcg/kg/h"] = "Dex"
+group$group2 = as.character(group$group2)
+
+# left join
+data1 = left_join(outcome1, group, by = "sid")
+data1 = left_join(data1, adj, by = "sid")
+data1 = data1 %>% filter(sid %in% mitt$sid)
+```
+
+```{r}
+# adj_14day_DFD is the imputed DFD for in-hospital DFDs -> up to 14 days.
+
+# make adj_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$adj_DFDs) %>% sort()
+data1$adj_DFDs = factor(data1$adj_DFDs, levels = levels, ordered = T)
+
+# make unadj_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$unadj_DFDs) %>% sort()
+data1$unadj_DFDs = factor(data1$unadj_DFDs, levels = levels, ordered = T)
+
+# make adj_ICU_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$adj_ICU_DFDs) %>% sort()
+data1$adj_ICU_DFDs = factor(data1$adj_ICU_DFDs, levels = levels, ordered = T)
+
+# make unadj_ICU_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$unadj_ICU_DFDs) %>% sort()
+data1$unadj_ICU_DFDs = factor(data1$unadj_ICU_DFDs, levels = levels, ordered = T)
+
+# set Placebo as the group reference
+data1$group = factor(data1$group)
+data1$group = relevel(data1$group, ref = "Placebo")
+
+data1$group2 = as.factor(data1$group2)
+data1$group2 = relevel(data1$group2, ref = "Placebo")
+
+#janitor::tabyl(outcome1$adj_DFDs)
+#janitor::tabyl(outcome1$unadj_DFDs)
+
+covariate = demo %>% 
+  select(sid, day_1_sofa_score, mean_iqcode_score, delirium_status,days_in_icu_pre_enrollment, days_in_hosp_pre_enrollment,obstructive_sleep_apnea_y_n,
+         med_prestudy_benzos_yn,med_prestudy_phenobarbital_yn)
+  
+data1 = left_join(data1, covariate, by = "sid")
+```
+
+```{r}
+# data1$delirium_status as 0/1
+data1$delirium_status = case_when(
+  data1$delirium_status == "N" ~ 0,
+  data1$delirium_status == "Y" ~ 1
+)
+
+```
+
+```{r}
+data1 = data1 %>% mutate(t_icu = days_in_icu_pre_enrollment)
+data1 = data1 %>% mutate(t_hosp = days_in_hosp_pre_enrollment)
+```
+
+```{r}
+# this is settup group variables not important
+group = group %>% mutate(group3g = group, group2g = group2, groupx = group)
+# set group now
+group = group %>% select(-group, -group2)
+# in group now we only have groupx, which is different
+group$groupx = group$group2g
+#group$groupx = group$group3g
+```
+# choose 2 groups or 3 groups
+```{r}
+data1$group_2g = data1$group2
+data1$group_3g = data1$group
+data1 = data1 %>% select(-group2, -group)
+
+# now new group2 = 2g or 3g
+# data1 = data1 %>% mutate(group2 = group_2g)
+data1 = data1 %>% mutate(group2 = group_3g)
+```
+
+
+Now we start analysis - distributions already checked up
+- primary analysis start here
+- group2 is group2g or group3g depending on the selection
+
+# Adjusted in-hosp DFDs
+## age
+```{r fig.height=6, fig.width=12}
+library(performance)
+test_data = data1 %>% select(adj_DFDs, group2, age) %>% mutate(age = if_else( age < 65, "Age < 65", "Age >= 65"))
+# adjusted model
+adjust = "age"
+fit1 = paste0("adj_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_DFDs ~ group2*age, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | age, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = age,estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "Age")
+emm4 = emm3 %>% mutate(estimate = exp(estimate), 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Age < 65", "Low", "High")
+         )
+  
+emm_age = emm4; rm(emm4)
+```
+
+## mean_iqcode_score
+We use 3.0 as cutoff. <= 3.0 normal, > 3.0 cognitive decline.
+```{r}
+# hist(data1$mean_iqcode_score)
+library(performance)
+test_data = data1 %>% 
+  select(adj_DFDs, group2, mean_iqcode_score) %>% 
+  mutate(mean_iqcode_score = if_else( mean_iqcode_score <= 3, "Score <= 3", "Score > 3"))
+# adjusted model
+adjust = "mean_iqcode_score"
+fit1 = paste0("adj_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_DFDs ~ group2*mean_iqcode_score, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | mean_iqcode_score, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = mean_iqcode_score, estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "IQCODE Score (Mean)")
+emm4 = emm3 %>% mutate(estimate = exp(estimate) , 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Score <= 3", "Low", "High")
+         )
+
+emm_iqcode = emm4; rm(emm4)
+```
+
+## day1_sofa_score
+w use >=5 vs <5
+```{r}
+# hist(data1$mean_iqcode_score)
+library(performance)
+test_data = data1 %>% 
+  select(adj_DFDs, group2, day_1_sofa_score) %>% 
+  mutate(day_1_sofa_score = if_else( day_1_sofa_score < 5, "Score < 5", "Score >= 5"))
+# adjusted model
+adjust = "day_1_sofa_score"
+fit1 = paste0("adj_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_DFDs ~ group2*day_1_sofa_score, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | day_1_sofa_score, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = day_1_sofa_score, estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "SOFA Score")
+emm4 = emm3 %>% mutate(estimate = exp(estimate) , 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Score < 5", "Low", "High")
+         )
+
+emm_sofa_score = emm4; rm(emm4)
+```
+
+## delirium_status
+```{r}
+# hist(data1$mean_iqcode_score)
+library(performance)
+test_data = data1 %>% 
+  select(adj_DFDs, group2, delirium_status) %>% 
+  mutate(delirium_status = if_else( delirium_status == 1, "Delirium = Y", "Delirium = N"))
+# adjusted model
+adjust = "delirium_status"
+fit1 = paste0("adj_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_DFDs ~ group2*delirium_status, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | delirium_status, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = delirium_status, estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "Delirium Status")
+emm4 = emm3 %>% mutate(estimate = exp(estimate) , 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Delirium = N", "Low", "High")
+         )
+
+emm_delirium_status = emm4; rm(emm4)
+```
+
+```{r}
+emm_all = rbind(emm_age,emm_iqcode,emm_sofa_score, emm_delirium_status)
+write_clip(emm_all)
+# emm_all_dex1 = emm_all %>% filter(contrast == "(Dex 0.1 mcg/kg/h) - Placebo")
+# write_clip(emm_all_dex1)
+# emm_all_dex2 = emm_all %>% filter(contrast == "(Dex 0.3 mcg/kg/h) - Placebo")
+# write_clip(emm_all_dex2)
+```
+
+
+
+# Adjusted icu DFDs
+## age
+```{r fig.height=6, fig.width=12}
+library(performance)
+test_data = data1 %>% select(adj_ICU_DFDs, group2, age) %>% mutate(age = if_else( age < 65, "Age < 65", "Age >= 65"))
+# adjusted model
+adjust = "age"
+fit1 = paste0("adj_ICU_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_ICU_DFDs ~ group2*age, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | age, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = age,estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "Age")
+emm4 = emm3 %>% mutate(estimate = exp(estimate), 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Age < 65", "Low", "High")
+         )
+  
+emm_age = emm4; rm(emm4)
+```
+
+## mean_iqcode_score
+We use 3.0 as cutoff. <= 3.0 normal, > 3.0 cognitive decline.
+```{r}
+# hist(data1$mean_iqcode_score)
+library(performance)
+test_data = data1 %>% 
+  select(adj_ICU_DFDs, group2, mean_iqcode_score) %>% 
+  mutate(mean_iqcode_score = if_else( mean_iqcode_score <= 3, "Score <= 3", "Score > 3"))
+# adjusted model
+adjust = "mean_iqcode_score"
+fit1 = paste0("adj_ICU_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_ICU_DFDs ~ group2*mean_iqcode_score, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | mean_iqcode_score, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = mean_iqcode_score, estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "IQCODE Score (Mean)")
+emm4 = emm3 %>% mutate(estimate = exp(estimate) , 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Score <= 3", "Low", "High")
+         )
+
+emm_iqcode = emm4; rm(emm4)
+```
+
+## day1_sofa_score
+w use >=5 vs <5
+```{r}
+# hist(data1$mean_iqcode_score)
+library(performance)
+test_data = data1 %>% 
+  select(adj_ICU_DFDs, group2, day_1_sofa_score) %>% 
+  mutate(day_1_sofa_score = if_else( day_1_sofa_score < 5, "Score < 5", "Score >= 5"))
+# adjusted model
+adjust = "day_1_sofa_score"
+fit1 = paste0("adj_ICU_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_ICU_DFDs ~ group2*day_1_sofa_score, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | day_1_sofa_score, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = day_1_sofa_score, estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "SOFA Score")
+emm4 = emm3 %>% mutate(estimate = exp(estimate) , 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Score < 5", "Low", "High")
+         )
+
+emm_sofa_score = emm4; rm(emm4)
+```
+
+
+## delirium_status
+```{r}
+# hist(data1$mean_iqcode_score)
+library(performance)
+test_data = data1 %>% 
+  select(adj_ICU_DFDs, group2, delirium_status) %>% 
+  mutate(delirium_status = if_else( delirium_status == 1, "Delirium = Y", "Delirium = N"))
+# adjusted model
+adjust = "delirium_status"
+fit1 = paste0("adj_ICU_DFDs", " ~ group2*", adjust)
+fit1
+mod1 = clm(adj_ICU_DFDs ~ group2*delirium_status, data = test_data, link = "logit")
+
+# get stratum-specific ORs
+library(emmeans)
+emm1 = emmeans(mod1, ~ group2 | delirium_status, type = "response")
+emm2 = pairs(emm1, reverse = T, adjust = "none") %>% confint() %>% as.data.frame()
+emm3 = emm2 %>% select(contrast, class = delirium_status, estimate,asymp.LCL, asymp.UCL) %>% mutate(variable = "Delirium Status")
+emm4 = emm3 %>% mutate(estimate = exp(estimate) , 
+                      asymp.LCL = exp(asymp.LCL), 
+                      asymp.UCL = exp(asymp.UCL))
+
+emm4 = emm4 %>% 
+  mutate(error_positive = asymp.UCL - estimate, 
+         error_negative = estimate - asymp.LCL,
+         risk = ifelse(class == "Delirium = N", "Low", "High")
+         )
+
+emm_delirium_status = emm4; rm(emm4)
+```
+
+```{r}
+emm_all = rbind(emm_age,emm_iqcode,emm_delirium_status,emm_sofa_score)
+write_clip(emm_all)
+# emm_all_dex1 = emm_all %>% filter(contrast == "(Dex 0.1 mcg/kg/h) - Placebo")
+# write_clip(emm_all_dex1)
+# emm_all_dex2 = emm_all %>% filter(contrast == "(Dex 0.3 mcg/kg/h) - Placebo")
+# write_clip(emm_all_dex2)
+```
+

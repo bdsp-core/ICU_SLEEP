@@ -1,0 +1,339 @@
+---
+title: "Sensitivity Analysis"
+output: 
+  html_notebook: 
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    theme: simplex
+    number_sections: true
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+---
+
+```{r warning=FALSE , message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(knitr)
+library(magrittr)
+library(janitor)
+library(readxl)
+options(scipen=999)
+library(readr)
+library(gofcat)
+
+# set width of the output
+options(width = 120)
+```
+
+# Load data
+```{r}
+outcome1 = readRDS("data/rds/outcome1.rds")
+group = readRDS("data/rds/group.rds")
+demo = readRDS("data/rds/demo.rds")
+itt = readRDS("data/rds/itt.rds")
+# sanity check: itt group does not contain keyword bolus
+# itt = itt %>% filter(randomization_allocation_assignment_list %in% c("Dex 0.1 mcg/kg/h", "Dex 0.3 mcg/kg/h", "Placebo"))
+# pp = readRDS("data/rds/pp.rds")
+mitt = readRDS("data/rds/mitt.rds")
+adj = demo %>% select(sid, age, sex, race, ethnicity)
+```
+
+# Apply analytical samples
+```{r}
+# use mitt
+outcome1 = outcome1 %>% filter(sid %in% mitt$sid)
+group = group %>% filter(sid %in% mitt$sid)
+
+# group2 to combine two Dex groups
+group$group2 = group$group %>% as.character()
+group$group2[group$group2 == "Dex 0.1 mcg/kg/h"] = "Dex"
+group$group2[group$group2 == "Dex 0.3 mcg/kg/h"] = "Dex"
+group$group2 = as.character(group$group2)
+
+# left join
+data1 = left_join(outcome1, group, by = "sid")
+data1 = left_join(data1, adj, by = "sid")
+data1 = data1 %>% filter(sid %in% mitt$sid)
+```
+
+```{r}
+# adj_14day_DFD is the imputed DFD for in-hospital DFDs -> up to 14 days.
+# clean up and set up variables
+
+# make adj_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$adj_DFDs) %>% sort()
+data1$adj_DFDs = factor(data1$adj_DFDs, levels = levels, ordered = T)
+
+# make unadj_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$unadj_DFDs) %>% sort()
+data1$unadj_DFDs = factor(data1$unadj_DFDs, levels = levels, ordered = T)
+
+# make adj_ICU_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$adj_ICU_DFDs) %>% sort()
+data1$adj_ICU_DFDs = factor(data1$adj_ICU_DFDs, levels = levels, ordered = T)
+
+# make unadj_ICU_DFDs a factor but ordinal based on the numeric value
+levels = unique(data1$unadj_ICU_DFDs) %>% sort()
+data1$unadj_ICU_DFDs = factor(data1$unadj_ICU_DFDs, levels = levels, ordered = T)
+
+# set Placebo as the group reference
+data1$group = factor(data1$group)
+data1$group = relevel(data1$group, ref = "Placebo")
+
+data1$group2 = as.factor(data1$group2)
+data1$group2 = relevel(data1$group2, ref = "Placebo")
+
+#janitor::tabyl(outcome1$adj_DFDs)
+#janitor::tabyl(outcome1$unadj_DFDs)
+
+covariate = demo %>% 
+  select(sid, day_1_sofa_score, mean_iqcode_score, delirium_status,days_in_icu_pre_enrollment, days_in_hosp_pre_enrollment,obstructive_sleep_apnea_y_n,
+         med_prestudy_benzos_yn,med_prestudy_phenobarbital_yn)
+  
+data1 = left_join(data1, covariate, by = "sid")
+```
+
+```{r}
+# data1$delirium_status as 0/1
+data1$delirium_status = case_when(
+  data1$delirium_status == "N" ~ 0,
+  data1$delirium_status == "Y" ~ 1
+)
+
+```
+
+```{r}
+data1 = data1 %>% mutate(t_icu = days_in_icu_pre_enrollment)
+data1 = data1 %>% mutate(t_hosp = days_in_hosp_pre_enrollment)
+```
+
+
+```{r}
+# this is settup group variables not important
+group = group %>% mutate(group3g = group, group2g = group2, groupx = group)
+# set group now
+group = group %>% select(-group, -group2)
+# in group now we only have groupx, which is different
+group$groupx = group$group2g
+#group$groupx = group$group3g
+```
+# choose 2 groups or 3 groups
+```{r}
+data1$group_2g = data1$group2
+data1$group_3g = data1$group
+data1 = data1 %>% select(-group2, -group)
+
+# now new group2 = 2g or 3g
+# data1 = data1 %>% mutate(group2 = group_2g)
+data1 = data1 %>% mutate(group2 = group_3g)
+```
+
+Now we start analysis - distributions already checked up
+- primary analysis start here
+- group2 is group2g or group3g depending on the selection
+
+# sen: add surg location
+```{r}
+locations = readRDS("data/rds/locations.rds")
+data1_loc = left_join(data1, locations, by = "sid")
+```
+
+## imputed in-hosp DFDs
+Note: adj in-hosp DFDs are calculated as imputed upto 14-day DFD.
+```{r}
+library(ordinal)
+mod1 = clm(adj_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, 
+           data = data1_loc, link = "logit")
+# summary(mod1)
+# brant.test(mod1)
+# scale_test(mod1)
+# tbl_regression(mod1,exponentiate = T,
+#                       estimate_fun = function(x) style_ratio(x, digits = 3),
+#                       pvalue_fun = function(x) style_pvalue(x, digits = 3))
+mod1a = clm(adj_DFDs ~ group2 + age + mean_iqcode_score + delirium_status + t_icu + t_hosp + any_location_surgical, 
+           data = data1_loc, link = "logit")
+# summary(mod1a)
+# brant.test(mod1a)
+# scale_test(mod1a)
+# tbl_regression(mod1a,exponentiate = T,
+#                       estimate_fun = function(x) style_ratio(x, digits = 3),
+#                       pvalue_fun = function(x) style_pvalue(x, digits = 3))
+
+
+
+# LR test
+anova(mod1, mod1a)
+# conclusion: no model improvement by adding surgical location, so we will not include surgical location in the model.
+```
+## imputed in-ICU DFDs
+```{r}
+library(ordinal)
+mod1 = clm(adj_ICU_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, 
+           data = data1_loc, link = "logit")
+# summary(mod1)
+# brant.test(mod1)
+# scale_test(mod1)
+# tbl_regression(mod1,exponentiate = T,
+#                       estimate_fun = function(x) style_ratio(x, digits = 3),
+#                       pvalue_fun = function(x) style_pvalue(x, digits = 3))
+mod1a = clm(adj_ICU_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp + any_location_surgical, 
+           data = data1_loc, link = "logit")
+# summary(mod1a)
+# brant.test(mod1a)
+# scale_test(mod1a)
+# tbl_regression(mod1a,exponentiate = T,
+#                       estimate_fun = function(x) style_ratio(x, digits = 3),
+#                       pvalue_fun = function(x) style_pvalue(x, digits = 3))
+
+# LR test
+anova(mod1, mod1a)
+# conclusion: no model improvement by adding surgical location, so we will not include surgical location in the model.
+```
+
+# sen: treat death within 14 days DFD as 0
+- we are taking this conservative approach for SA
+- we set any death within 14 days in hospital as 0
+```{r}
+death1 = readRDS("data/rds/surv1.rds")
+data1_d0 = data1 %>% select(sid, adj_DFDs, adj_ICU_DFDs, group2, age, mean_iqcode_score, day_1_sofa_score, delirium_status, t_icu, t_hosp)
+data1_d0 = left_join(data1_d0, death1 %>% select(sid,mortality_in_icu,mortality_in_hosp), by = "sid")
+```
+
+
+```{r}
+CreateCatTable(data = data1_d0, vars = "mortality_in_icu",strata = "group2",test = F) %>% print(showAllLevels = T)
+CreateCatTable(data = data1_d0, vars = "mortality_in_hosp",strata = "group2",test = F) %>% print(showAllLevels = T)
+```
+
+```{r}
+# correct all DFDs to 0 if death within 14 days
+# print, get mean(sd), and then change
+data1_d0 %>% filter(mortality_in_hosp == "Y") %>% 
+  select(sid, adj_DFDs) %>% 
+  nrow() %>% 
+  paste("mortality_in_hosp == Y, n =", ., "patients")
+
+# how many is non-zero
+data1_d0 %>% filter(mortality_in_hosp == "Y" & adj_DFDs>0) %>% 
+  select(sid, adj_DFDs) %>% 
+  nrow() %>% 
+  paste("mortality_in_hosp == Y, non-zero n =", ., "patients, will be changed to 0")
+
+# now re-code
+data1_d0$adj_DFDs[data1_d0$mortality_in_hosp == "Y"] = 0
+summary(data1_d0$adj_DFDs[data1_d0$mortality_in_hosp == "Y"])
+```
+```{r}
+# now do the same for ICU DFDs
+data1_d0 %>% filter(mortality_in_hosp == "Y") %>% 
+  select(sid, adj_ICU_DFDs) %>% 
+  nrow() %>% 
+  paste("mortality_in_hosp == Y, n =", ., "patients")
+
+data1_d0 %>% filter(mortality_in_hosp == "Y" & adj_ICU_DFDs>0) %>% 
+  select(sid, adj_ICU_DFDs) %>% 
+  nrow() %>% 
+  paste("mortality_in_hosp == Y, non-zero n =", ., "patients, will be changed to 0")
+
+# now re-code
+data1_d0$adj_ICU_DFDs[data1_d0$mortality_in_hosp == "Y"] = 0
+summary(data1_d0$adj_ICU_DFDs[data1_d0$mortality_in_hosp == "Y"])
+```
+## imputed in-hosp 14-day DFDs with death in hosp as 0
+```{r}
+library(gtsummary)
+# rerun mv model
+library(ordinal)
+mod1 = clm(adj_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, 
+           data = data1_d0, link = "logit")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+
+## imputed in-ICU DFDs with death in hosp as 0
+```{r}
+mod1 = clm(adj_ICU_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, 
+           data = data1_d0, link = "logit")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+# GAMLASS
+```{r}
+library(gamlss)
+data1_gamlss = data1 %>% select(sid, adj_DFDs, adj_ICU_DFDs, group2, age, mean_iqcode_score, day_1_sofa_score, delirium_status, t_icu, t_hosp)
+
+# change adj_DFDs as numeric
+data1_gamlss$adj_DFDs_num = as.numeric(as.character(data1_gamlss$adj_DFDs))
+
+mod1 <- gamlss(
+  adj_DFDs_num ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,  # Formula for mu (location)
+  sigma.formula = ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,  # Formula for sigma (scale)
+  family = NO(),  # Assuming a normal distribution; adjust as appropriate
+  data = data1_gamlss
+)
+
+summary(mod1)
+```
+
+```{r}
+# change adj_ICU_DFDs as numeric
+data1_gamlss$adj_ICU_DFDs_num = as.numeric(as.character(data1_gamlss$adj_ICU_DFDs))
+
+mod1 <- gamlss(
+  adj_ICU_DFDs_num ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,  # Formula for mu (location)
+  sigma.formula = ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp,  # Formula for sigma (scale)
+  family = NO(),  # Assuming a normal distribution; adjust as appropriate
+  data = data1_gamlss
+)
+
+summary(mod1)
+```
+# re-ordering
+- regroup in hospital DFDs by every 2 days, as some categories did not exist
+- no need for ICU DFDs, as this issue did not exist.
+```{r}
+
+data1_relevel = data1 %>% select(sid, adj_DFDs, adj_ICU_DFDs, group2, age, mean_iqcode_score, day_1_sofa_score,delirium_status, t_icu, t_hosp)
+
+# reduce DFD to every 2 days, so 7 levels
+data1_relevel$adj_DFDs = as.numeric(as.character(data1$adj_DFDs))
+# cut them by 2 days, so 0-2, 2-4, 4-6, 6-8, 8-10, 10-12, 12-14
+data1_relevel$adj_DFDs = cut(data1_relevel$adj_DFDs, breaks = c(-0.001, 2, 4, 6, 8, 10, 12, 14), include.lowest = T)
+# make it ordinal
+data1_relevel$adj_DFDs = ordered(data1_relevel$adj_DFDs)
+```
+
+```{r}
+mod1 = clm(adj_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, 
+           data = data1_relevel, link = "logit")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
+
+```{r}
+mod1 = clm(adj_ICU_DFDs ~ group2 + age + mean_iqcode_score + day_1_sofa_score + delirium_status + t_icu + t_hosp, 
+           data = data1_relevel, link = "logit")
+summary(mod1)
+brant.test(mod1)
+scale_test(mod1)
+tbl_regression(mod1,exponentiate = T,
+                      estimate_fun = function(x) style_ratio(x, digits = 3),
+                      pvalue_fun = function(x) style_pvalue(x, digits = 3))
+```
