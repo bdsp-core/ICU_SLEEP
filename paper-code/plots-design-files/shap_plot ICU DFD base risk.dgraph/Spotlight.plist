@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Labels</key>
+	<string>Global Importance of baseline risk predictors (ICU-DFDs, 2 Groups)
+Global Importance
+Baseline risk predictors
+mean_abs_shap
+mean_abs_shap
+</string>
+	<key>Text</key>
+	<string></string>
+</dict>
+</plist>

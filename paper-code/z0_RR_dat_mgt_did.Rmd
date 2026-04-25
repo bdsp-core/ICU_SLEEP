@@ -1,0 +1,395 @@
+---
+title: "Data Management (De-identified data)"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    theme: simplex
+    number_sections: yes
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+---
+
+```{r warning=FALSE , message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(knitr)
+library(magrittr)
+library(janitor)
+library(readxl)
+options(scipen=999)
+library(readr)
+```
+
+# load main table
+```{r}
+library(readr)
+
+data1 = read_csv("data/ICU-SLEEP_Enrolled_Deidentified.csv",
+                 na = c("n/a", "N/A", "?", ""),
+                 show_col_types = FALSE,
+                 guess_max = 100000)
+data1 = data1 %>% filter(is.na(SID) == FALSE)
+
+issues = problems(data1)
+names1 = names(data1) %>% as.data.frame()
+```
+
+```{r}
+data1 = clean_names(data1)
+names = names(data1) %>% as.data.frame()
+print(names)
+```
+
+# get ITT sample
+```{r}
+ITT = data1 %>% select(
+  #zid,
+  #mrn,
+  sid,
+  sid_status,
+  analysis_population_m_itt,
+  analysis_population_pp,
+  analysis_population_safety,
+  randomized,
+  randomization_allocation_assignment_list,
+  received_study_drug_any_amount_y_n,
+  dosing_structure_initial_bolus_continuous_final_continuous,
+  at_least_one_efficacy_measurement_is_obtained_y_n,
+  withdrawn = withdrawn_y_n,
+  reason_for_withdrawal= reason_for_withdrawal_notes_1,
+  were_all_eligibility_requirements_met_at_the_time_of_enrollment_i_e_met_all_inclusion_criteria_and_none_of_the_exclusion_criteria_y_n,
+  if_not_all_eligibility_requirements_were_met_at_the_time_of_enrollment_please_explain
+)
+
+# save
+saveRDS(ITT, "data/rds/itt_full.rds")
+```
+
+# get group table
+```{r}
+group = data1 %>% select(sid,group = randomization_allocation_assignment_list)
+tabyl(group$group) %>% as.data.frame()
+# n ~ quitely balanced
+
+# save
+saveRDS(group, "data/rds/group.rds")
+```
+
+# demo table
+```{r}
+# table(data1$icu_total_coma_days_from_date_of_first_drug_adminstration_71 == data1$icu_total_coma_days_from_date_of_first_drug_adminstration_76)
+
+# table(data1$in_hosp_total_coma_days_from_date_of_first_drug_adminstration_82 == data1$in_hosp_total_coma_days_from_date_of_first_drug_adminstration_87)
+
+# table(data1$in_hosp_total_coma_days_from_date_of_first_drug_adminstration_87 == data1$in_hosp_total_coma_days_from_date_of_first_drug_adminstration_94)
+
+# precheck done: all the same variables at diff columns
+```
+
+```{r}
+demo <- data1 %>%
+  select(
+    sid,
+    age = age_years_at_enrollment,
+    sex = sex, 
+    race = race, 
+    ethnicity = ethnicity_hispanic_or_latino,
+    education = education_years,
+    mean_iqcode_score = mean_iqcode_sf_score_1_5,
+    cci_cci_score_weighted,
+    lawton_iadl_total_score_0_8,
+    #days_in_icu_pre_enrollment = days_in_icu_pre_enrollment_for_icu_admission_during_which_the_pt_was_enrolled,
+    #days_in_hosp_pre_enrollment,
+    primary_diagnosis = primary_diagnosis_for_icu_admission_during_which_the_pt_was_enrolled_categorized,
+    day_1_sofa_score,
+    cardiac_dysfunction = presence_of_any_significant_reported_cardiac_dysfunction_ejection_fraction_30_percent_at_baseline,
+    # Use of sedative or analgesic agents before enrollment (total doses while in ICU)
+    med_prestudy_opioids,
+    med_prestudy_benzos,
+    med_prestudy_phenobarbital,
+    med_prestudy_chlordiazepoxide,
+    med_prestudy_antipsychotics,
+    med_prestudy_propofol,
+    med_prestudy_ketamine,
+    med_prestudy_dexmedetomidine,
+    med_prestudy_melatonin,
+    # Use of sedative or analgesic agents during days 1-7 of enrollment (total doses while in ICU)
+    med_duringstudy_opioids,
+    med_duringstudy_benzos,
+    med_duringstudy_phenobarbital,
+    med_duringstudy_chlordiazepoxide,
+    med_duringstudy_antipsychotics,
+    med_duringstudy_propofol,
+    med_duringstudy_ketamine,
+    med_duringstudy_dexmedetomidine,
+    med_duringstudy_melatonin,
+    # adj_in_hosp_d_coma_days = imputed_in_hosp_total_delirium_or_coma_days_from_date_of_first_drug_adminstration,
+    adj_in_hosp_coma_days = in_hosp_total_coma_days_from_date_of_first_drug_administration_134,
+    # adj_icu_d_coma_days = imputed_icu_total_delirium_or_coma_days_from_date_of_first_drug_adminstration,
+    adj_icu_coma_days = icu_total_coma_days_from_date_of_first_drug_administration_123,
+    nrs_sleep_score = nrs_sleep_score_for_sleep_quality_on_night_before_date_of_first_drug_administration_initial_cognitive_testing_scores_before_receiving_the_first_study_intervention_numeric_rating_scale_for_sleep_nrs_sleep_score_for_sleep_quality_on_the_previous_night,
+    delirium_status = delirium_status_on_date_enrolled,
+    weight = weight_kg,
+    obstructive_sleep_apnea_y_n,
+    history_of_depression_y_n,
+    #`Average light and noise levels throughout the ICU course`
+    extubation_status = extubation_status_at_time_of_enrollment_non_intubated_intubated,
+    cardiac_dysfunction_baseline = presence_of_any_significant_reported_cardiac_dysfunction_ejection_fraction_30_percent_at_baseline,
+    
+    # add other patches
+    days_in_icu_pre_enrollment = days_in_icu_pre_enrollment_for_icu_admission_during_which_the_pt_was_enrolled,
+    days_in_hosp_pre_enrollment
+  )
+
+# debug = demo %>% select(sid, delirium_status) %>% filter(!delirium_status %in% c(0,1))
+
+# age normalization
+demo$age = demo$age %>% as.character() %>% parse_number()
+
+# race reordering
+
+demo$race = factor(demo$race, levels = c(
+  "American Indian or Alaska Native",
+  "Asian", 
+  "Black or African American",
+  "White",
+  "More than one race [White; American Indian or Alaska Native]",
+  "Unknown or not disclosed"
+  )
+)
+
+# first remove ?
+demo$delirium_status = demo$delirium_status %>% as.character() %>% str_replace_all("\\?","")
+# then recode Coma as 1
+demo$delirium_status = demo$delirium_status %>% as.character() %>% str_replace_all("Coma","1")
+# last convert 0 to N, 1 to Y
+demo$delirium_status = demo$delirium_status %>% as.character() %>% str_replace_all("0","N")
+demo$delirium_status = demo$delirium_status %>% as.character() %>% str_replace_all("1","Y")
+
+# create new variables
+demo = demo %>%
+  mutate(
+    med_prestudy_opioids_yn = ifelse(med_prestudy_opioids > 0, 1, 0),
+    med_prestudy_benzos_yn = ifelse(med_prestudy_benzos > 0, 1, 0),
+    med_prestudy_phenobarbital_yn = ifelse(med_prestudy_phenobarbital > 0, 1, 0),
+    med_prestudy_chlordiazepoxide_yn = ifelse(med_prestudy_chlordiazepoxide > 0, 1, 0),
+    med_prestudy_antipsychotics_yn = ifelse(med_prestudy_antipsychotics > 0, 1, 0),
+    med_prestudy_propofol_yn = ifelse(med_prestudy_propofol > 0, 1, 0),
+    med_prestudy_ketamine_yn = ifelse(med_prestudy_ketamine > 0, 1, 0),
+    med_prestudy_dexmedetomidine_yn = ifelse(med_prestudy_dexmedetomidine > 0, 1, 0),
+    med_prestudy_melatonin_yn = ifelse(med_prestudy_melatonin > 0, 1, 0),
+    
+    med_duringstudy_opioids_yn = ifelse(med_duringstudy_opioids > 0, 1, 0),
+    med_duringstudy_benzos_yn = ifelse(med_duringstudy_benzos > 0, 1, 0),
+    med_duringstudy_phenobarbital_yn = ifelse(med_duringstudy_phenobarbital > 0, 1, 0),
+    med_duringstudy_chlordiazepoxide_yn = ifelse(med_duringstudy_chlordiazepoxide > 0, 1, 0),
+    med_duringstudy_antipsychotics_yn = ifelse(med_duringstudy_antipsychotics > 0, 1, 0),
+    med_duringstudy_propofol_yn = ifelse(med_duringstudy_propofol > 0, 1, 0),
+    med_duringstudy_ketamine_yn = ifelse(med_duringstudy_ketamine > 0, 1, 0),
+    med_duringstudy_dexmedetomidine_yn = ifelse(med_duringstudy_dexmedetomidine > 0, 1, 0),
+    med_duringstudy_melatonin_yn = ifelse(med_duringstudy_melatonin > 0, 1, 0)
+  )
+
+demo$mean_iqcode_score = as.numeric(demo$mean_iqcode_score)
+
+# save
+saveRDS(demo, "data/rds/demo.rds")
+```
+
+# outcomes
+```{r}
+outcome1 = data1 %>%
+  select(
+    sid,
+    # hosp
+    unadj_DFDs = unimputed_in_hosp_total_delirium_or_coma_free_days_from_date_of_first_drug_administration_in_hospital_delirium_free_days_ih_df_ds_primary_outcome_aim_1a,
+    adj_DFDs = imputed_14_day_window_total_delirium_or_coma_free_days_from_date_of_first_drug_administration, # imputed as 14 day
+    adj_d_or_coma_days = imputed_14_day_window_total_delirium_or_coma_days_from_date_of_first_drug_administration,
+    # icu
+    unadj_ICU_DFDs = unimputed_icu_total_delirium_or_coma_free_days_from_date_of_first_drug_administration_icu_delirium_free_days_icu_df_ds_secondary_outcome_aim_1b,
+    adj_ICU_DFDs = imputed_7_day_window_total_delirium_or_coma_free_days_from_date_of_first_drug_administration, # imputed as 7 day
+    adj_icu_d_or_coma_days = imputed_7_day_window_total_delirium_or_coma_days_from_date_of_first_drug_administration
+  )
+
+# save
+saveRDS(outcome1, "data/rds/outcome1.rds")
+```
+
+# surv1
+```{r}
+library(readr)
+# clean date format
+surv1 = data1 %>% select(
+  sid,
+  date_enrolled = date_time_enrolled_signed_icf_completed,
+  date_time_first_study_drug_administration = date_time_first_study_drug_administration,
+  # TODO: drug admin date-time
+  death_date = date_time_death,
+  hosp_admission_dts = hosp_admission_dts,
+  hosp_discharge_dts = hosp_discharge_dts,
+  icu_admission_dts = icu_admission_dts_for_icu_admission_during_which_the_pt_was_enrolled,
+  icu_discharge_dts = icu_discharge_dts_for_icu_admission_during_which_the_pt_was_enrolled,
+  
+  enroll_death_days = days_from_date_time_enrolled_to_date_time_death,
+  first_drug_death_days = days_from_date_time_first_study_drug_administration_to_date_time_death,
+  
+  mortality_in_icu = mortality_in_icu_for_icu_admission_during_which_the_pt_was_enrolled,
+  mortality_in_hosp = mortality_in_hospital,
+  days_from_date_time_enrolled_to_date_time_death = days_from_date_time_enrolled_to_date_time_death,
+  days_from_date_time_first_study_drug_administration_to_date_time_death = days_from_date_time_first_study_drug_administration_to_date_time_death,
+  mortality_within_14d_from_date_enrolled = mortality_within_14d_from_date_time_enrolled_y_n,
+  mortality_within_14d_from_first_med_adm = mortality_within_14d_from_date_time_first_study_drug_administration_y_n,
+  mortality_drug_14d = mortality_within_14d_from_date_time_first_study_drug_administration_y_n,
+  mortality_within_12_months_from_date_enrolled = mortality_within_12mo_from_date_time_enrolled_y_n,
+  icu_los_for_icu_admission_during_which_the_pt_was_enrolled = icu_los_for_icu_admission_during_which_the_pt_was_enrolled,
+  hosp_los = hosp_los,
+  readmit_30d_discharge = re_admit_within_30d_from_date_of_hosp_discharge_y_n,
+  deposition_outcome = disposition_level_of_support_at_hosp_discharge
+)
+
+surv1 = surv1 %>% mutate(
+    date_enrolled = lubridate::ymd_hms(date_enrolled),
+    date_time_first_study_drug_administration = lubridate::ymd_hms(date_time_first_study_drug_administration),
+    death_date = lubridate::ymd_hms(death_date),
+    hosp_admission_dts = lubridate::ymd_hms(hosp_admission_dts),
+    hosp_discharge_dts = lubridate::ymd_hms(hosp_discharge_dts),
+    icu_admission_dts = lubridate::ymd_hms(icu_admission_dts),
+    icu_discharge_dts = lubridate::ymd_hms(icu_discharge_dts)
+)
+
+# fix mortality in icu
+surv1 = surv1 %>% mutate(
+  mortality_in_icu = case_when(
+    mortality_in_icu == "Y" ~ "Y",
+    mortality_in_icu == "N" ~ "N",
+    mortality_in_icu == "N*" ~ "N",
+    TRUE ~ NA_character_
+  )
+)
+
+# fix readmit
+surv1 = surv1 %>% mutate(
+  readmit_30d_discharge = case_when(
+    readmit_30d_discharge == "Y" ~ "Y",
+    readmit_30d_discharge == "N (ED visit only)" ~ "N",
+    readmit_30d_discharge == "N*" ~ "N",
+    readmit_30d_discharge == "N" ~ "N",
+    TRUE ~ NA_character_
+  )
+)
+
+# fix days variables
+surv1$enroll_death_days = as.numeric(surv1$enroll_death_days)
+surv1$first_drug_death_days = as.numeric(surv1$first_drug_death_days)
+
+
+# table(surv1$deposition_outcome2) %>% as.data.frame()
+```
+
+
+```{r}
+# recode deposition outcomes
+surv1 <- surv1 %>%
+  mutate(
+    deposition_outcome = case_when(
+      deposition_outcome == "Acute Rehabilitation Facility" ~
+        "Acute Inpatient Rehabilitation Facility (IRF)",
+      deposition_outcome == "Deceased" ~ "Deceased",
+      deposition_outcome == "Home, self-care" ~ "Home, self-care",
+      deposition_outcome == "Home, with services" ~ "Home, with services",
+      deposition_outcome %in% c("Hospice Service (Home)", "Hospice Service (Inpatient)") ~ "Hospice Service",
+      deposition_outcome == "Long-term Acute Care (LTAC) - Hospital (LTACH)" ~ "Long-term Acute Care Hospital (LTACH)",
+      deposition_outcome == "Long-Term Care (LTC) Facility" ~ "Long-Term Care (LTC) Facility or Nursing Home",
+      deposition_outcome == "Short-term Hospital" ~ "Short-term/-Stay Hospital (SSH), Acute Care Hospital (ACH)",
+      deposition_outcome %in% c(
+        "Skilled Nursing Facility (SNF)",
+        "Skilled Nursing Facility (SNF)/Subacute Rehab (SAR)"
+      ) ~ "Subacute Rehab (SAR)/Skilled Nursing Facility (SNF)",
+      TRUE ~ deposition_outcome   # catch other values if present
+    ), 
+    # now set factor with your specified level order
+    deposition_outcome = factor(deposition_outcome,
+      levels = c(
+        "Home, self-care",
+        "Home, with services",
+        "Subacute Rehab (SAR)/Skilled Nursing Facility (SNF)",
+        "Acute Inpatient Rehabilitation Facility (IRF)",
+        "Long-Term Care (LTC) Facility or Nursing Home",
+        "Long-term Acute Care Hospital (LTACH)",
+        "Hospice Service",
+        "Short-term/-Stay Hospital (SSH), Acute Care Hospital (ACH)",
+        "Psychiatric Facility",
+        "Deceased"
+      )
+    )
+  )
+
+surv1 = surv1 %>%
+  mutate(
+    survival_days_in_icu = as.numeric(difftime(death_date, icu_admission_dts, units = "days")), # icu admission date
+    survival_days_in_hosp = as.numeric(difftime(death_date, hosp_admission_dts, units = "days")) # hosp_admission_dts
+  ) %>%
+  # then set values = NA if patients did not die
+  mutate(
+    survival_days_in_icu = ifelse(mortality_in_icu == "N", NA, survival_days_in_icu),
+    survival_days_in_hosp = ifelse(mortality_in_hosp == "N", NA, survival_days_in_hosp)
+  )
+
+
+# DID unify datetimes (optional)
+# surv2 = surv1 %>% mutate(date_enrolled2 = date_enrolled)
+# surv2 = surv2 %>%
+#   mutate(
+#     date_enrolled = lubridate::ymd_hms("2010-01-01 09:00:00"),
+#     offset = date_enrolled2-date_enrolled
+#   )
+# surv2 = surv2 %>%
+#   mutate(
+#     date_time_first_study_drug_administration = date_time_first_study_drug_administration - offset,
+#     death_date = death_date - offset,
+#     hosp_admission_dts = hosp_admission_dts - offset,
+#     hosp_discharge_dts = hosp_discharge_dts - offset,
+#     icu_admission_dts = icu_admission_dts - offset,
+#     icu_discharge_dts = icu_discharge_dts - offset
+#   ) %>%
+#   select(-date_enrolled2, -offset)
+
+# save rds
+saveRDS(surv1, "data/rds/surv1.rds")
+```
+
+# location
+```{r}
+locations = data1 %>% select(sid, icu_site_at_enrollment)
+locations = clean_names(locations) 
+locations = locations %>% na.omit()
+# rename icu_site_at_enrollment to location_of_study_visit_specific
+locations = locations %>% rename(location_of_study_visit_specific = icu_site_at_enrollment)
+# find surgical locations
+locations = locations %>%
+  mutate(location_surgical = case_when(
+    str_detect(tolower(location_of_study_visit_specific), "sicu") ~ "Y",
+    TRUE ~ "N"
+  ))
+
+# group by each sid and if any location_surgical = Y then Y; if all N then N. use case_when
+locations = locations %>%
+  group_by(sid) %>%
+  summarise(
+    any_location_surgical = case_when(
+      any(location_surgical == "Y") ~ "Y",
+      TRUE ~ "N"
+    )
+  )
+
+# save rds
+saveRDS(locations, "data/rds/locations.rds")
+```
+
+

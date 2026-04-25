@@ -1,0 +1,44 @@
+{
+  "title": "ICU-SLEEP — Investigation of Sleep in the Intensive Care Unit (analysis code)",
+  "description": "Analysis pipeline for the ICU-SLEEP randomized controlled trial of nocturnal dexmedetomidine (Dex) in non-ventilated medical/surgical ICU patients aged 50+ (NCT03355053; MGB IRB #2017P000090). Reproduces baseline characteristic tables, primary and secondary outcomes (in-hospital and ICU delirium-free days), 3-arm sensitivity analyses, survival/mortality, and forest plots. Companion data is distributed via bdsp.io and AWS S3 (s3://bdsp-opendata-credentialed/icu-sleep/).",
+  "license": "MIT",
+  "keywords": ["ICU", "delirium", "dexmedetomidine", "sleep", "randomized controlled trial", "clinical trial"],
+  "creators": [
+    {"name": "Tesh, Ryan A."},
+    {"name": "Deng, Hao"},
+    {"name": "Quadri, Syed A."},
+    {"name": "Adra, Noor"},
+    {"name": "Bucklin, Abigail A."},
+    {"name": "Leone, Michael J."},
+    {"name": "Hemmige, Aashritha"},
+    {"name": "Rajan, Subapriya"},
+    {"name": "Krishnamurthy, Parimala V."},
+    {"name": "Gallagher, Kaileigh"},
+    {"name": "Panneerselvam, Ezhil"},
+    {"name": "Firme, Marcos S."},
+    {"name": "Ali, Syed Musadiq"},
+    {"name": "Ali, Syed Zahid"},
+    {"name": "Ayub, Muhammad Abubakar"},
+    {"name": "Paixao, Luis"},
+    {"name": "Higgins, Jasmine M."},
+    {"name": "Ganglberger, Wolfgang"},
+    {"name": "Ju, Yawen"},
+    {"name": "Banks, Jayme"},
+    {"name": "Coughlin, Brian"},
+    {"name": "Houle, Timothy T."},
+    {"name": "Leveroni, Catherine L."},
+    {"name": "DiBiasio, Alan J."},
+    {"name": "Kuller, David"},
+    {"name": "Rosand, Jonathan"},
+    {"name": "Thompson, B. Taylor"},
+    {"name": "Thomas, Robert J."},
+    {"name": "Akeju, Oluwaseun"},
+    {"name": "Westover, M. Brandon", "affiliation": "Beth Israel Deaconess Medical Center"}
+  ],
+  "related_identifiers": [
+    {"identifier": "NCT03355053", "relation": "isReferencedBy", "scheme": "other"}
+  ],
+  "grants": [
+    {"id": "10.13039/100000065::R01NS102190"}
+  ]
+}

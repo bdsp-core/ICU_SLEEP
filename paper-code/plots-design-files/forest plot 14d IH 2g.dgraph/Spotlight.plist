@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Labels</key>
+	<string>Forest Plot: Marginal OR Estimations of Imputed In-Hospital DFDs (14-day)
+Odds Ratio
+Covariates
+Crude model
+Ref: OR = 1
+</string>
+	<key>Text</key>
+	<string></string>
+</dict>
+</plist>
