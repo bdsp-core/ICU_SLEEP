@@ -8,15 +8,20 @@ Status legend: ✅ = exact match, ≈ = matches within rounding, ⚠ = matches b
 
 ## Patient flow (Methods + Results para 1)
 
-| Paper claim | Source / how computed | Computed | Status |
+The deid Enrolled file has 526 rows total — these include patients enrolled across two protocol designs (the original "bolus + continuous" design n=40 raw, and the final "continuous" design n=486 raw) plus replacement entries. The published numbers are derived as follows:
+
+| Paper claim | Formula | Computed | Status |
 |---|---|---|---|
-| 482 patients enrolled (Jan 2019 – Mar 2022) | not directly produced; deid file has 526 rows total (likely includes patients excluded prior to randomization) | 526 | ❌ — see [open question 1](#open-questions-for-hao--ryan) |
-| 347 received intervention (safety pop) | `analysis_population_safety == "Y"` gives 369; difference of 22 corresponds to "original bolus design" patients | 369 | ❌ — see [open question 2](#open-questions-for-hao--ryan) |
-| 312 entered mITT | `mitt.rds` rows; produced by `z1_RR_tables.Rmd:60` filter `analysis_population_m_itt == "Y"` | 312 | ✅ |
-| 35 excluded from mITT | derived 347 – 312 = 35 (paper); not derivable from code (see above) | 57 | ❌ |
+| **482 patients enrolled** (Jan 2019 – Mar 2022) | `count(dosing_structure == "Final (continuous)") − count(sid_status == "Replaced; Repeat subject")` = 486 − 4 | **482** | ✅ |
+| **22 original bolus design** (Tables in supplement) | `count(dosing == "Initial (bolus + continuous)" AND sid_status == "Retained (Final)" AND safety == "Y")` | **22** | ✅ |
+| **347 received intervention** (main safety pop) | `count(analysis_population_safety == "Y") − 22 (original bolus design)` = 369 − 22 | **347** | ✅ |
+| **35 excluded from mITT** | 347 − 312 | **35** | ✅ |
+| **312 entered mITT** | `mitt.rds` rows; `analysis_population_m_itt == "Y"` filter (`z1_RR_tables.Rmd:60`) | **312** | ✅ |
 | Dex pooled n = 207 | `mitt %>% left_join(group) %>% filter(group ∈ Dex 0.1, Dex 0.3)` | 207 | ✅ |
 | Placebo n = 105 | same join, group == "Placebo" | 105 | ✅ |
 | PP n = 5 | `pp.rds` rows; `analysis_population_pp == "Y"` filter | 5 | ✅ |
+
+**Source of the 482/22/347 derivations:** Ryan Tesh, 2026-04-25.
 
 ---
 
@@ -139,11 +144,11 @@ These computations are straightforward from the AE CSV — they just need a scri
 
 ## Open questions for Hao + Ryan
 
-1. **"482 enrolled"** vs deid file's 526 rows — what's the criterion that yields 482? Is it a date filter (Jan 2019 – Mar 2022)? A specific column flag? Without this we can't reproduce CONSORT diagram top-of-funnel exactly.
+1. ~~**"482 enrolled"** ~~ — **RESOLVED 2026-04-25** by Ryan. Formula: `count(dosing="Final (continuous)") − count(sid_status="Replaced; Repeat subject")` = 486 − 4 = 482. See patient-flow table above.
 
-2. **"347 received intervention"** vs `analysis_population_safety == "Y"` count of 369 — the paper's safety dataset excludes the 22 "original bolus design" patients but no column in the data flags them. Add a column like `excluded_original_design` to the source data, or document which SIDs constitute the original-design subset, so the 347 can be reproduced.
+2. ~~**"347 received intervention"**~~ — **RESOLVED 2026-04-25** by Ryan. Formula: `count(safety="Y") − 22 (original bolus design)` = 369 − 22 = 347. The 22 original-design patients are recoverable as `dosing="Initial (bolus + continuous)" AND sid_status="Retained (Final)" AND safety="Y"` (no separate column needed).
 
-3. **Adverse-events analysis script is missing.** All Tables S7–S10 numbers (any AE, any SAE, breakdown by event type [bradycardia, hypotension, etc.], counts/IQR per patient, SMDs, P-values) come from somewhere — please add or share the corresponding R script. Also clarify the off-by-one in "any AE" count (paper 169 vs CSV 168 for Dex); could be a single SAE-only patient that paper counts in "any AE" or vice versa.
+3. **Adverse-events analysis script is missing.** All Tables S7–S10 numbers (any AE, any SAE, breakdown by event type [bradycardia, hypotension, etc.], counts/IQR per patient, SMDs, P-values) are not produced by any script in the current pipeline — please add or share the corresponding R script. Also clarify the off-by-one in "any AE" count (paper 169 vs CSV 168 for Dex).
 
 4. **Survival HR exact reproduction** — `z2_RR_survival_analysis.Rmd` needs to be re-run start-to-finish on the deid CSV to confirm HR=1.01 reproduces exactly (independent recasting gave 1.04). Just a verification step; Hao's script is the source of truth.
 
