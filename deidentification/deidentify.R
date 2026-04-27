@@ -25,8 +25,11 @@ suppressPackageStartupMessages({
   library(janitor)
 })
 
-INPUT_XLSX <- "../ICU_SLEEP_final_FromHao/data/ICU-SLEEP_Data_P1_Deidentified_11.26.25.xlsx"
-OUTDIR <- "../_deid_output"
+# Paths can be overridden via env vars ICU_SLEEP_DEID_INPUT_XLSX and ICU_SLEEP_DEID_OUTDIR
+INPUT_XLSX <- Sys.getenv("ICU_SLEEP_DEID_INPUT_XLSX",
+                         unset = "../ICU_SLEEP_final_FromHao/data/ICU-SLEEP_Data_P1_Deidentified_11.26.25.xlsx")
+OUTDIR     <- Sys.getenv("ICU_SLEEP_DEID_OUTDIR",
+                         unset = "../_deid_output")
 dir.create(OUTDIR, showWarnings = FALSE, recursive = TRUE)
 
 SEED <- 20260425L
@@ -106,14 +109,32 @@ apply_deid <- function(df, sheet_name) {
     df$DOB <- as.POSIXct(NA)  # all NA; preserves column position
   }
 
-  # 3) Cap age at 89
+  # 3) HIPAA Safe Harbor age handling:
+  #    - Floor to integer (drops partial-year precision tied to original DOB,
+  #      e.g., 89.3 -> 89; per HIPAA, ages 0-89 may be retained as integers)
+  #    - Top-code ages >= 90 to a single value of 90 (the "90 or older" bucket).
+  #      We use the numeric sentinel 90 so the analysis pipeline can keep
+  #      treating the column as numeric.
   age_col <- "Age (years) [at enrollment]"
   if (age_col %in% names(df)) {
-    n_over <- sum(df[[age_col]] > 89, na.rm = TRUE)
-    if (n_over > 0) {
-      cat("  CAPPING ", n_over, " ages > 89 to 89\n")
-      df[[age_col]] <- pmin(df[[age_col]], 89, na.rm = FALSE)
+    v_orig <- df[[age_col]]
+    v_num  <- suppressWarnings(as.numeric(v_orig))
+    # Source already top-codes some patients as strings like "90 or above; [Redacted]";
+    # they become NA after as.numeric. Detect and treat them as >=90.
+    already_topcoded <- !is.na(v_orig) & is.na(v_num) & grepl("90", v_orig)
+    n_top_numeric <- sum(v_num >= 90, na.rm = TRUE)
+    n_top_string  <- sum(already_topcoded)
+    n_top <- n_top_numeric + n_top_string
+    if (n_top > 0) {
+      cat("  TOP-CODING ", n_top, " ages >= 90 to 90 ",
+          "(", n_top_numeric, " numeric + ", n_top_string,
+          " already-string-topcoded; HIPAA Safe Harbor)\n", sep = "")
     }
+    # Floor numeric ages, top-code at 90, then merge in already-topcoded patients as 90.
+    v_num <- floor(v_num)
+    v_num <- pmin(v_num, 90)
+    v_num[already_topcoded] <- 90
+    df[[age_col]] <- v_num
   }
 
   # 4) Shift native date/datetime columns
@@ -198,16 +219,33 @@ for (sn in names(manifest)) {
             m$file, m$n_rows, m$n_cols, m$size_mb, sn))
 }
 manifest_lines <- c(manifest_lines, "",
-  "Deidentification applied:",
-  "  - Dropped: ZID, DOB columns",
-  "  - Capped: 'Age (years) [at enrollment]' at 89 (HIPAA Safe Harbor for >=90)",
-  "  - Shifted: all date/datetime values per-SID by a random offset (range +/-1095 d)",
-  "             (within-patient intervals are preserved, so all derived",
-  "              days_from_X_to_Y values remain unchanged)",
-  "  - Redacted: free-text 'Re-admit date' column -> '[Date redacted]'",
+  "Deidentification applied (TWO LAYERS):",
+  "  Layer 1 - applied by the trial team prior to release to the analysis team:",
+  "    - Removed: names, MRN",
+  "    - Date-shifted: all dates (including DOB) per-patient (shift values redacted",
+  "      from the released 'Date shift' column)",
+  "    - Top-coded: 2 patients (>= 90 years) flagged as '90 or above'",
   "",
-  "NOT INCLUDED in public release: per-SID shift table",
-  "  (kept internally as _INTERNAL_DO_NOT_PUBLISH_shifts.csv)"
+  paste0("  Layer 2 - applied by this script (deidentify.R; seed=", SEED,
+         ", second per-SID shift in +/-", SHIFT_RANGE_DAYS, " days):"),
+  "    - Blanked: DOB column values (column kept for analysis-pipeline column-",
+  "               position stability)",
+  "    - Age handling: floored numeric ages to integer (drops partial-year",
+  "                    precision); top-coded all ages >= 90 to numeric 90",
+  "                    (combined with layer-1 string-topcoded entries)",
+  "    - Shifted: all date/datetime values per-SID by an additional random",
+  "               offset (deterministic seed) on top of layer 1",
+  "    - Redacted: free-text 'Re-admit date' column -> '[Date redacted]'",
+  "",
+  "  Combined effect: within-patient intervals are preserved exactly through",
+  "  both layers, so all interval-based outcomes (LOS, days_to_X, survival,",
+  "  DFDs) and primary/secondary OR/CI/P statistics are identical to the",
+  "  un-shifted source.",
+  "",
+  "NOT INCLUDED in public release: per-SID layer-2 shift table",
+  "  (kept internally as _INTERNAL_DO_NOT_PUBLISH_shifts.csv).",
+  "NOT KNOWN to the analysis team: per-patient layer-1 shift values",
+  "  (held by the trial team)."
 )
 writeLines(manifest_lines, file.path(OUTDIR, "MANIFEST.txt"))
 cat("\nWrote MANIFEST.txt\n")

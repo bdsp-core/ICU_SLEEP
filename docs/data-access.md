@@ -44,6 +44,7 @@ aws s3 sync s3://bdsp-opendata-credentialed/icu-sleep/ ./icu-sleep-data/
 | `ICU-SLEEP_Delirium_Deidentified.csv` | 7,364 | 189 | longitudinal delirium evaluations |
 | `ICU-SLEEP_Study_Drug_Deidentified.csv` | 1,421 | 50 | per-night study drug administration records |
 | `ICU-SLEEP_Adverse_Events_Deidentified.csv` | 2,878 | 18 | adverse events log |
+| `ICU-SLEEP_Data_Deidentified_PUBLIC.xlsx` | — | — | one workbook with 4 sheets matching the CSVs above; preserves source cell colors, fonts, and study-team comments (lost in CSV format). For visual inspection; use the CSVs for programmatic analysis. |
 | `MANIFEST.txt` | — | — | provenance and de-identification summary |
 | `ICU-SLEEP_SAP_06.19.24_Signed.pdf` | — | — | signed Statistical Analysis Plan |
 | `codebook.md` | — | — | data dictionary (also see [docs/codebook.md](codebook.md)) |
