@@ -1,0 +1,364 @@
+---
+title: "AE analysis"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    theme: simplex
+    number_sections: true
+    highlight: zenburn
+    fig_width: 8
+    fig_height: 6
+    css: custom.css
+  html_document:
+    toc: true
+    toc_depth: '4'
+    df_print: paged
+---
+
+```{r warning=FALSE, message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(tableone)
+library(openxlsx)
+library(sjPlot)
+library(knitr)
+library(magrittr)
+library(gtsummary)
+library(janitor)
+```
+
+# Data Setup 
+```{r}
+library(readxl)
+# load ae excel: sheet = ICU-SLEEP_Adverse Events sheet; only columns = SID, Event
+
+ae <- read_xlsx("data/ICU-SLEEP_Data_P1_Deidentified_11.26.25.xlsx", 
+                sheet = "ICU-SLEEP_Adverse Events", range = "B1:F2879") %>% 
+  clean_names() %>% 
+  select(sid, event, event_type)
+
+# add row_number to account for multiple AE or SAE per patient
+ae <- ae %>% group_by(sid, event_type, event) %>%
+  mutate(event_count_id = row_number()) %>%
+  ungroup()
+
+# group
+group = readRDS("data/rds/group.rds") %>% select(sid, group)
+mitt = readRDS("data/rds/mitt.rds")
+
+# merge
+ae_all = ae %>% filter(sid %in% mitt$sid)
+group = group %>% filter(sid %in% mitt$sid)
+```
+
+# recode SAE subtypes
+```{r}
+ae_all <- ae_all %>%
+  mutate(event = case_when(
+    sid == "197b" & event == "other_sae" & event_count_id == 1  ~ "Cardiac arrhythmias: Newly developed A-Fib",
+    sid == "246" & event == "other_sae" & event_count_id == 1 ~ "Cardiac arrhythmias: Newly developed V-tach",
+    sid == "246" & event == "other_sae" & event_count_id == 2 ~ "Cardiac arrhythmias: Newly developed V-tach",
+    sid == "312" & event == "other_sae" & event_count_id == 1  ~ "Cardiac arrhythmias: Newly developed A-Fib",
+    sid == "320" & event == "other_sae" & event_count_id == 1 ~ "Cardiac arrhythmias: SVT, unspecified",
+    sid == "330" & event == "other_sae" & event_count_id == 1 ~ "Cardiac arrhythmias: Newly developed A-Fib",
+    sid == "341" & event == "other_sae" & event_count_id == 1 ~ "Cardiac arrhythmias: Newly developed A-Fib",
+    sid == "345" & event == "other_sae" & event_count_id == 1 ~ "Cardiac arrhythmias: AFib-RVR (hx pAF)",
+    sid == "350" & event == "other_sae" & event_count_id == 1 ~ "Cardiac arrhythmias: AFib-RVR (hx pAF)",
+    TRUE         ~ event          # keep existing value otherwise
+  ))
+
+ae_all = ae_all %>% select(-event_count_id)
+```
+
+# choose 2 groups or 3 groups
+```{r}
+group = group %>%
+  mutate(group_3g = group) %>%
+  mutate(group_2g = case_when(group == "Placebo" ~ "Placebo",
+                             group == "Dex 0.1 mcg/kg/h" ~ "Dex",
+                             group == "Dex 0.3 mcg/kg/h" ~ "Dex"
+                             ))
+
+group = group %>% select(-group)
+
+# now select 2group or 3 group
+group = group %>% mutate(groupx = group_2g)
+# group = group %>% mutate(groupx = group_3g)
+
+table(group$groupx)
+table(ae$event)
+```
+
+# analytical tables
+```{r}
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 1: per-patient summary for "any event" of a given type (AE or SAE)
+# ─────────────────────────────────────────────────────────────────────────────
+summarise_any <- function(events_df, etype) {
+  events_df %>%
+    filter(event_type == etype) %>%
+    group_by(sid) %>%
+    summarise(any_count = n(), .groups = "drop") %>%
+    mutate(any_ind = 1L)
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2: per-patient summary for ONE subtype
+# returns a df with: sid, <prefix>, <prefix>_count
+# ─────────────────────────────────────────────────────────────────────────────
+summarise_subtype <- function(events_df, etype, event_name, prefix) {
+  cnt <- paste0(prefix, "_count")
+  events_df %>%
+    filter(event_type == etype, event == event_name) %>%
+    group_by(sid) %>%
+    summarise(!!cnt := n(), .groups = "drop") %>%
+    mutate(!!prefix := 1L)
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 3: assemble wide df — one row per patient in `base_group`
+# subtypes_map: named list (prefix -> data event name); NA = subtype absent in data
+# ─────────────────────────────────────────────────────────────────────────────
+build_wide <- function(events_df, etype, subtypes_map, base_group) {
+  any_ev   <- summarise_any(events_df, etype)
+  present  <- subtypes_map[!is.na(subtypes_map)]
+
+  sub_dfs <- lapply(names(present), function(p) {
+    summarise_subtype(events_df, etype, present[[p]], p)
+  })
+
+  wide <- Reduce(function(x, y) left_join(x, y, by = "sid"),
+                 c(list(base_group, any_ev), sub_dfs))
+
+  # binary: 0 if no event; count: keep NA so median ignores patients without event
+  bin_cols <- c("any_ind", names(present))
+  cnt_cols <- c("any_count", paste0(names(present), "_count"))
+  wide %>%
+    mutate(across(all_of(bin_cols), ~replace_na(as.integer(.x), 0L)),
+           across(all_of(cnt_cols), as.integer))
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 4: pad missing subtypes (not in data) with 0 binary / NA count columns
+# ─────────────────────────────────────────────────────────────────────────────
+pad_missing_subtypes <- function(wide, subtypes_map) {
+  miss <- names(subtypes_map)[is.na(subtypes_map)]
+  for (p in miss) {
+    wide[[p]]                   <- 0L
+    wide[[paste0(p, "_count")]] <- NA_integer_
+  }
+  wide
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 5: condition subtype indicators on having any event at all
+# (subtype binary set to NA where any_ind == 0 -> denominator = any_ind == Yes)
+# ─────────────────────────────────────────────────────────────────────────────
+condition_on_any <- function(wide, prefixes) {
+  wide %>%
+    mutate(across(all_of(prefixes),
+                  ~ifelse(any_ind == 0, NA_integer_, .x)))
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 6: cast binary cols to Yes/No factors
+# ─────────────────────────────────────────────────────────────────────────────
+factorize_binary <- function(wide, binary_vars) {
+  wide %>%
+    mutate(across(all_of(binary_vars),
+                  ~factor(.x, levels = c(0, 1), labels = c("No", "Yes"))))
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 7: build & print tableone
+# ─────────────────────────────────────────────────────────────────────────────
+build_tableone <- function(wide, prefixes, strata = "group") {
+  binary_vars <- c("any_ind", prefixes)
+  count_vars  <- c("any_count", paste0(prefixes, "_count"))
+  tab_vars    <- as.vector(rbind(binary_vars, count_vars))   # interleave
+
+  CreateTableOne(
+    vars       = tab_vars,
+    factorVars = binary_vars,
+    strata     = strata,
+    data       = wide
+  )
+}
+
+print_tableone <- function(tab, prefixes, label,
+                           exact = character(0)) {           
+  count_vars <- c("any_count", paste0(prefixes, "_count"))
+  cat("\n========== ", label, " ==========\n")
+  print(tab,
+        nonnormal     = count_vars,
+        exact         = exact,                                
+        smd           = TRUE,
+        showAllLevels = FALSE,
+        quote         = FALSE,
+        noSpaces      = TRUE)
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper: pick which prefixes to display (drop missing + skip user-specified)
+# ─────────────────────────────────────────────────────────────────────────────
+select_prefixes <- function(subtypes_map,
+                            skip = character(0),
+                            drop_missing = TRUE) {
+  prefixes <- names(subtypes_map)
+  if (drop_missing) prefixes <- prefixes[!is.na(subtypes_map[prefixes])]
+  setdiff(prefixes, skip)
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subtype maps — edit here to control what appears in each table
+# ─────────────────────────────────────────────────────────────────────────────
+ae_map <- list(
+  hr_low_rel  = "hr_low_rel_ae",
+  hr_low_abs  = "hr_low_abs_ae",
+  hr_high_rel = NA,
+  hr_high_abs = "hr_high_abs_ae",
+  bp_low_rel  = NA,
+  bp_low_abs  = "bp_low_abs_ae",
+  bp_high_rel = NA,
+  bp_high_abs = "bp_high_abs_ae"
+)
+
+sae_map <- list(
+  hr_low_rel     = NA,
+  hr_low_abs     = "hr_low_abs_sae",
+  hr_high_rel    = NA,
+  hr_high_abs    = NA,
+  bp_low_rel     = NA,
+  bp_low_abs     = "bp_low_abs_sae",
+  bp_high_rel    = NA,
+  bp_high_abs    = NA,
+  afib_new       = "Cardiac arrhythmias: Newly developed A-Fib",
+  vtach_new      = "Cardiac arrhythmias: Newly developed V-tach",
+  svt_unspec     = "Cardiac arrhythmias: SVT, unspecified",
+  afib_rvr_hxpaf = "Cardiac arrhythmias: AFib-RVR (hx pAF)"
+)
+
+auto_exact <- function(wide, prefixes, strata = "group") {
+  bins <- c("any_ind", prefixes)
+  exact <- c()
+  for (v in bins) {
+    tb <- table(wide[[v]], wide[[strata]])
+    if (any(dim(tb) < 2)) { exact <- c(exact, v); next }
+    expected <- chisq.test(tb)$expected
+    if (any(expected < 5)) exact <- c(exact, v)
+  }
+  exact
+}
+```
+
+## AE
+```{r}
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE — AE
+# ─────────────────────────────────────────────────────────────────────────────
+ae_prefixes <- select_prefixes(ae_map, skip = character(0))
+ae_wide <- build_wide(ae_all, "AE", ae_map, group) %>%
+  pad_missing_subtypes(ae_map) %>%
+  condition_on_any(ae_prefixes) %>%
+  factorize_binary(c("any_ind", ae_prefixes))
+ae_exact <- auto_exact(ae_wide, ae_prefixes, strata = "groupx")
+
+ae_tab <- build_tableone(ae_wide, ae_prefixes,strata = "groupx")
+print_tableone(ae_tab, ae_prefixes, "Adverse Events (AE)",exact = ae_exact)
+```
+
+## SAE
+```{r, warning=FALSE}
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE — SAE
+# ─────────────────────────────────────────────────────────────────────────────
+skip_vars = c(
+  "hr_low_rel",
+  "hr_high_rel",
+  "hr_high_abs",
+  "bp_low_rel",
+  "bp_high_rel",
+  "bp_high_abs"
+)
+
+sae_prefixes <- select_prefixes(sae_map, skip = skip_vars)
+
+sae_wide <- build_wide(ae_all, "SAE", sae_map, group) %>%
+  pad_missing_subtypes(sae_map) %>%
+  condition_on_any(sae_prefixes) %>%
+  factorize_binary(c("any_ind", sae_prefixes))
+
+sae_exact <- auto_exact(sae_wide, sae_prefixes, strata = "groupx")
+
+sae_tab <- build_tableone(sae_wide, sae_prefixes,strata = "groupx")
+print_tableone(sae_tab, sae_prefixes, "Serious Adverse Events (SAE)", exact = sae_exact)
+```
+
+## SAE, Total events/patient
+```{r}
+sae2 = ae_all %>% filter(event_type == "SAE") %>%
+  group_by(sid) %>%
+  summarise(sae_count = n(), .groups = "drop")
+
+sae2 = group %>% select(sid, groupx) %>%
+  left_join(.,sae2, by = "sid") %>%
+  mutate(sae_count = replace_na(sae_count, 0L))
+
+sae2$sae_count = as.character(sae2$sae_count)
+
+# tableone
+sae2_tab <- CreateTableOne(
+  vars       = "sae_count",
+  strata     = "groupx",
+  data       = sae2
+)
+
+print(sae2_tab,
+      nonnormal     = "sae_count",
+      smd           = TRUE,
+      showAllLevels = FALSE,
+      quote         = FALSE,
+      exact         = "sae_count",
+      noSpaces      = TRUE)
+  
+```
+## any kind of AE (AE + SAE)
+```{r}
+ae2 = ae_all %>% select(sid, event_type)
+
+ae2 = ae2 %>% group_by(sid) %>%
+  summarise(any_ae = ifelse(any(event_type %in% c("AE", "SAE")), 1, 0), 
+            ae_count = sum(event_type %in% c("AE", "SAE")), .groups = "drop")
+# then merge with group (na as 0) and make tableone
+ae2 = group %>% select(sid, groupx) %>%
+  left_join(.,ae2, by = "sid") %>%
+  mutate(any_ae = replace_na(any_ae, 0L),
+         # ae_count = replace_na(ae_count, 0L),
+         any_ae = factor(any_ae, levels = c(0, 1), labels = c("No", "Yes")))
+
+any_ae_tab <- CreateTableOne(
+  vars       = c("any_ae", "ae_count"),
+  factorVars = "any_ae",
+  strata     = "groupx",
+  data       = ae2
+)
+
+print(any_ae_tab,
+      nonnormal     = "ae_count",
+      smd           = TRUE,
+      showAllLevels = FALSE,
+      quote         = FALSE,
+      noSpaces      = TRUE)
+```
+
+
+
+
+
+
+
+
