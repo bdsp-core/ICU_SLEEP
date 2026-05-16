@@ -4,7 +4,7 @@ This script transforms the source semi-deidentified Excel workbook into the publ
 
 ## Source
 
-The non-public source workbook (held under PHI controls by the study team) is `ICU-SLEEP_Data_P1_Deidentified_11.26.25.xlsx`. It contains 4 sheets: Enrolled, Delirium, Study Drug, Adverse Events. As received it had names/MRN/ZID redacted to `[Redacted]`, and date columns had already been per-patient date-shifted by the trial team (the per-patient shift values originally lived in a "Date shift" column, which was redacted in the file released to the analysis team). DOB and other date columns were retained but in shifted form.
+The non-public source workbook (held under PHI controls by the study team) is `ICU-SLEEP_Data_P1_Deidentified_11.26.25.xlsx`. It contains 4 sheets: Enrolled, Delirium, Study Drug, Adverse Events. As received it had names/MRN/ZID redacted to `[Redacted]`, and date columns had already been per-patient date-shifted by the trial team (the per-patient shift values originally lived in a "Date shift" column, which was redacted in the file released to the analysis team). The magnitude of this layer-1 shift was ±364 days (per-patient shift values ranged from −363 to +364 days). DOB and other date columns were retained but in shifted form.
 
 ## What `deidentify.R` does
 
