@@ -28,3 +28,6 @@ paper-code/data/rds/*.rds
 
 # Internal artifacts that must NOT be published
 **/_INTERNAL_DO_NOT_PUBLISH_*
+paper-code/data/ICU-SLEEP_Data_P1_Deidentified_11.26.25.xlsx
+.gitignore
+paper-code/data/rds/full_cohort_347.xlsx
