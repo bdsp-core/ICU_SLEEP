@@ -798,9 +798,48 @@ tbl_mod8 <- tbl_regression(
 tbl_mod8
 ```
 
+# additional sensitivity analysis (Firth logistic regression)
+## mortality in ICU (Firth logistic regression)
+```{r}
+library(logistf)
+library(gtsummary)
+library(gt)
 
+# Firth logistic regression
+mod_firth <- logistf(mortality_in_icu ~ groupx, data = tdata2)
 
+tbl_regression(
+  mod_firth,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)) %>%
+  as_gt() %>%
+  gt::tab_header(title = "Mortality in ICU (Firth)")
+```
 
+## ketamine (Firth logistic regression)
+```{r}
+library(logistf)
+library(gtsummary)
+library(gt)
+
+mod_ketamine_firth <- logistf(
+  med_duringstudy_ketamine_yn ~ groupx,
+  data = tdata2
+)
+
+tbl_ketamine_firth <- tbl_regression(
+  mod_ketamine_firth,
+  exponentiate = TRUE,
+  estimate_fun = ~ style_number(.x, digits = 3),
+  pvalue_fun   = ~ style_pvalue(.x, digits = 3)
+) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = md("ketamine during study (Y/N): Odds Ratios (Firth)")
+  )
+tbl_ketamine_firth
+```
 
 
 
